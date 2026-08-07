@@ -1,0 +1,2554 @@
+substitutions:
+  # Default name
+  name: "athom-rf-ir-remote"
+  # Default friendly name
+  friendly_name: "Athom RF IR Remote"
+  # Allows ESP device to be automatically linked to an 'Area' in Home Assistant. Typically used for areas such as 'Lounge Room', 'Kitchen' etc
+  room: ""
+  # Description as appears in ESPHome & top of webserver page
+  device_description: "Athom AR01V3 RF/IR bridge with protocol-aware learning, Flipper import, 10x ESP-RC01 reception and HA deduplication"
+  # Project Name
+  project_name: "envpl.ar01v3_esp_rc01_gateway"
+  # Projection version denotes the release version of the yaml file, allowing checking of deployed vs latest version
+  project_version: "1.0.0"
+  # Stable identifier included in events sent to Home Assistant
+  receiver_id: "ar01v3_1"
+  # Define a domain for this device to use. i.e. iot.home.lan (so device will appear as athom-smart-plug-v2.iot.home.lan in DNS/DHCP logs)
+  dns_domain: ".local"
+  # Set timezone of the smart plug. Useful if the plug is in a location different to the HA server. Can be entered in unix Country/Area format (i.e. "Australia/Sydney")
+  timezone: ""
+  # Set the duration between the sntp service polling ntp.org servers for an update
+  sntp_update_interval: 6h
+  # Network time servers for your region, enter from lowest to highest priority. To use local servers update as per zones or countries at: https://www.ntppool.org/zone/@
+  sntp_server_1: "0.pool.ntp.org"
+  sntp_server_2: "1.pool.ntp.org"
+  sntp_server_3: "2.pool.ntp.org"
+  # Enables faster network connections, with last connected SSID being connected to and no full scan for SSID being undertaken
+  wifi_fast_connect: "false"
+  # Define logging level: NONE, ERROR, WARN, INFO, DEBUG (Default), VERBOSE, VERY_VERBOSE
+  log_level: "INFO"
+  # Enable or disable the use of IPv6 networking on the device
+  ipv6_enable: "false"
+  # valid value: ballu, coolix, daikin, daikin_arc, daikin_brc, delonghi, emmeti, fujitsu_general, gree, hitachi_ac344, hitachi_ac424, climate_ir_lg, midea_ir, mitsubishi, noblex, tcl112, toshiba, whirlpool, yashima, whynter, zhlt01, heatpumpir
+  # https://esphome.io/components/climate/climate_ir/
+  AC_Platform_name: "coolix"
+
+#########################GPIO######################
+  RF_RX_PIN: GPIO19
+  RF_TX_PIN: GPIO18
+  IR_RX_PIN: GPIO33
+  IR_TX_PIN: GPIO25
+  Button_PIN: GPIO0
+  LED_PIN: GPIO27
+#########################GPIO######################
+
+esphome:
+  name: "${name}"
+  friendly_name: "${friendly_name}"
+  comment: "${device_description}"
+  area: "${room}"
+  devices:
+    - id: ha_slot_actions_device
+      name: "AR01V3 Stored Signal Actions"
+  name_add_mac_suffix: false
+  min_version: 2026.7.3
+  project:
+    name: "${project_name}"
+    version: "${project_version}"
+  platformio_options:
+    board_build.flash_mode: dio
+  on_boot:
+    - priority: -100
+      then:
+        - script.execute: espnow_restore_peers
+        - lambda: |-
+            id(signal_select_index) = std::clamp(id(signal_select_index), 0, 9);
+            id(rf_signal_select_index) = std::clamp(id(rf_signal_select_index), 0, 15);
+            id(signal_slot_select).publish_state("Signal " + std::to_string(id(signal_select_index)));
+            id(rf_signal_slot_select).publish_state("Signal " + std::to_string(id(rf_signal_select_index)));
+
+esp32:
+  board: esp32dev
+  variant: esp32
+  flash_size: 8MB
+  framework:
+    type: esp-idf
+    version: recommended
+    sdkconfig_options:
+      # @grigi found in testing that these options resulted in better responsiveness.
+      # BLE 4.2 is supported by ALL ESP32 boards that have bluetooth, the original and derivatives.
+      CONFIG_BT_BLE_42_FEATURES_SUPPORTED: y
+      # Extend the watchdog timeout, so the device reboots if the device appears locked up for over 10 seconds.
+      CONFIG_ESP_TASK_WDT_TIMEOUT_S: "10"
+
+preferences:
+  flash_write_interval: 5s
+
+# Global variables for IR learning
+globals:
+  - id: is_learning_mode
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  - id: signal_select_index
+    type: int
+    restore_value: yes
+    initial_value: '0'
+  - id: filter_size
+    type: int
+    restore_value: no
+    initial_value: '10'
+  - id: ir_learn_deadline
+    type: uint32_t
+    restore_value: no
+    initial_value: '0'
+  - id: ir_pending_raw
+    type: std::vector<int32_t>
+    restore_value: no
+  - id: ir_pending_nec_valid
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  - id: ir_pending_nec_address
+    type: uint16_t
+    restore_value: no
+    initial_value: '0'
+  - id: ir_pending_nec_command
+    type: uint16_t
+    restore_value: no
+    initial_value: '0'
+  # RF433 learning mode flag (independent from IR learning)
+  - id: is_rf_learning_mode
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  # Logical RF slot 0-15. The storage component applies the NVS offset +10.
+  - id: rf_signal_select_index
+    type: int
+    restore_value: yes
+    initial_value: '0'
+  # A single RC-Switch decode can be a short false match. Require three
+  # consecutive identical protocol+code callbacks before writing the slot.
+  - id: rf_candidate_code
+    type: uint64_t
+    restore_value: no
+    initial_value: '0'
+  - id: rf_candidate_protocol
+    type: uint8_t
+    restore_value: no
+    initial_value: '0'
+  - id: rf_candidate_count
+    type: uint8_t
+    restore_value: no
+    initial_value: '0'
+
+  # ESP-NOW: ten paired ESP-RC01 remotes per receiver
+  - id: remote_mac_1
+    type: std::array<uint8_t, 6>
+    restore_value: yes
+    initial_value: "std::array<uint8_t, 6>{0, 0, 0, 0, 0, 0}"
+  - id: remote_mac_2
+    type: std::array<uint8_t, 6>
+    restore_value: yes
+    initial_value: "std::array<uint8_t, 6>{0, 0, 0, 0, 0, 0}"
+  - id: remote_mac_3
+    type: std::array<uint8_t, 6>
+    restore_value: yes
+    initial_value: "std::array<uint8_t, 6>{0, 0, 0, 0, 0, 0}"
+  - id: remote_mac_4
+    type: std::array<uint8_t, 6>
+    restore_value: yes
+    initial_value: "std::array<uint8_t, 6>{0, 0, 0, 0, 0, 0}"
+  - id: remote_mac_5
+    type: std::array<uint8_t, 6>
+    restore_value: yes
+    initial_value: "std::array<uint8_t, 6>{0, 0, 0, 0, 0, 0}"
+  - id: remote_mac_6
+    type: std::array<uint8_t, 6>
+    restore_value: yes
+    initial_value: "std::array<uint8_t, 6>{0, 0, 0, 0, 0, 0}"
+  - id: remote_mac_7
+    type: std::array<uint8_t, 6>
+    restore_value: yes
+    initial_value: "std::array<uint8_t, 6>{0, 0, 0, 0, 0, 0}"
+  - id: remote_mac_8
+    type: std::array<uint8_t, 6>
+    restore_value: yes
+    initial_value: "std::array<uint8_t, 6>{0, 0, 0, 0, 0, 0}"
+  - id: remote_mac_9
+    type: std::array<uint8_t, 6>
+    restore_value: yes
+    initial_value: "std::array<uint8_t, 6>{0, 0, 0, 0, 0, 0}"
+  - id: remote_mac_10
+    type: std::array<uint8_t, 6>
+    restore_value: yes
+    initial_value: "std::array<uint8_t, 6>{0, 0, 0, 0, 0, 0}"
+  - id: remote_paired_1
+    type: bool
+    restore_value: yes
+    initial_value: "false"
+  - id: remote_paired_2
+    type: bool
+    restore_value: yes
+    initial_value: "false"
+  - id: remote_paired_3
+    type: bool
+    restore_value: yes
+    initial_value: "false"
+  - id: remote_paired_4
+    type: bool
+    restore_value: yes
+    initial_value: "false"
+  - id: remote_paired_5
+    type: bool
+    restore_value: yes
+    initial_value: "false"
+  - id: remote_paired_6
+    type: bool
+    restore_value: yes
+    initial_value: "false"
+  - id: remote_paired_7
+    type: bool
+    restore_value: yes
+    initial_value: "false"
+  - id: remote_paired_8
+    type: bool
+    restore_value: yes
+    initial_value: "false"
+  - id: remote_paired_9
+    type: bool
+    restore_value: yes
+    initial_value: "false"
+  - id: remote_paired_10
+    type: bool
+    restore_value: yes
+    initial_value: "false"
+
+  # Local duplicate suppression inside one receiver. Sequence is RAM-only.
+  - id: remote_last_seq_1
+    type: uint32_t
+    restore_value: no
+    initial_value: "0xFFFFFFFF"
+  - id: remote_last_seq_2
+    type: uint32_t
+    restore_value: no
+    initial_value: "0xFFFFFFFF"
+  - id: remote_last_seq_3
+    type: uint32_t
+    restore_value: no
+    initial_value: "0xFFFFFFFF"
+  - id: remote_last_seq_4
+    type: uint32_t
+    restore_value: no
+    initial_value: "0xFFFFFFFF"
+  - id: remote_last_seq_5
+    type: uint32_t
+    restore_value: no
+    initial_value: "0xFFFFFFFF"
+  - id: remote_last_seq_6
+    type: uint32_t
+    restore_value: no
+    initial_value: "0xFFFFFFFF"
+  - id: remote_last_seq_7
+    type: uint32_t
+    restore_value: no
+    initial_value: "0xFFFFFFFF"
+  - id: remote_last_seq_8
+    type: uint32_t
+    restore_value: no
+    initial_value: "0xFFFFFFFF"
+  - id: remote_last_seq_9
+    type: uint32_t
+    restore_value: no
+    initial_value: "0xFFFFFFFF"
+  - id: remote_last_seq_10
+    type: uint32_t
+    restore_value: no
+    initial_value: "0xFFFFFFFF"
+
+  # Pairing state; slot 1..10 must represent the same physical remote on every AR01V3
+  - id: remote_pairing_slot
+    type: int
+    restore_value: yes
+    initial_value: "1"
+  - id: remote_pairing
+    type: bool
+    restore_value: no
+    initial_value: "false"
+  - id: remote_pair_deadline
+    type: uint32_t
+    restore_value: no
+    initial_value: "0"
+
+  # Temporary peer operations used by on_unknown_peer
+  - id: remote_peer_add_pending
+    type: bool
+    restore_value: no
+    initial_value: "false"
+  - id: remote_peer_delete_pending
+    type: bool
+    restore_value: no
+    initial_value: "false"
+  - id: remote_peer_add_mac
+    type: std::array<uint8_t, 6>
+    restore_value: no
+    initial_value: "std::array<uint8_t, 6>{0, 0, 0, 0, 0, 0}"
+  - id: remote_peer_delete_mac
+    type: std::array<uint8_t, 6>
+    restore_value: no
+    initial_value: "std::array<uint8_t, 6>{0, 0, 0, 0, 0, 0}"
+
+  # Packet values copied before the queued handler is called
+  - id: remote_rx_slot
+    type: int
+    restore_value: no
+    initial_value: "0"
+  - id: remote_rx_seq
+    type: uint32_t
+    restore_value: no
+    initial_value: "0"
+  - id: remote_rx_button
+    type: uint8_t
+    restore_value: no
+    initial_value: "0"
+  - id: remote_rx_battery
+    type: uint8_t
+    restore_value: no
+    initial_value: "0"
+  - id: remote_current_button_name
+    type: std::string
+    restore_value: no
+    initial_value: '"unknown"'
+  - id: remote_current_mac
+    type: std::string
+    restore_value: no
+    initial_value: '"00:00:00:00:00:00"'
+# Flash storage component for saving IR/RF signals
+Flash_comp:
+  id: signal_nvs
+
+# Authenticated local page: http://DEVICE/flipper
+# Imports Flipper .ir/.sub files into the same slots used by IR/RF buttons.
+flipper_importer:
+  id: flipper_web_importer
+  storage_id: signal_nvs
+  ir_transmitter_id: ir_transmitter
+  rf_transmitter_id: rf_transmitter
+  ir_status_id: status_text
+  rf_status_id: rf_status_text
+  ir_slot_status_ids:
+    - ir_slot_status_0
+    - ir_slot_status_1
+    - ir_slot_status_2
+    - ir_slot_status_3
+    - ir_slot_status_4
+    - ir_slot_status_5
+    - ir_slot_status_6
+    - ir_slot_status_7
+    - ir_slot_status_8
+    - ir_slot_status_9
+  rf_slot_status_ids:
+    - rf_slot_status_0
+    - rf_slot_status_1
+    - rf_slot_status_2
+    - rf_slot_status_3
+    - rf_slot_status_4
+    - rf_slot_status_5
+    - rf_slot_status_6
+    - rf_slot_status_7
+    - rf_slot_status_8
+    - rf_slot_status_9
+    - rf_slot_status_10
+    - rf_slot_status_11
+    - rf_slot_status_12
+    - rf_slot_status_13
+    - rf_slot_status_14
+    - rf_slot_status_15
+
+api:
+  reboot_timeout: 0s
+  actions:
+    # Fire-and-forget variants intentionally have no response mode. Home
+    # Assistant presents their scalar variables as an editable action form.
+    - action: transmit_ir_nec
+      variables:
+        address: int
+        command: int
+        repeats: int
+      then:
+        - lambda: |-
+            id(flipper_web_importer).send_ir_nec_now(address, command, repeats);
+
+    - action: transmit_ir_raw
+      variables:
+        timings: string
+        carrier_hz: int
+        duty_percent: int
+        repeats: int
+      then:
+        - lambda: |-
+            id(flipper_web_importer).send_ir_raw_text_now(
+                timings, carrier_hz, duty_percent, repeats);
+
+    - action: transmit_rf_princeton
+      variables:
+        code_hex: string
+        bit_count: int
+        te_us: int
+        guard_multiplier: int
+        repeats: int
+        gap_ms: int
+      then:
+        - lambda: |-
+            id(flipper_web_importer).send_rf_princeton_now(
+                code_hex, bit_count, te_us, guard_multiplier, repeats, gap_ms);
+
+    - action: transmit_rf_dooya
+      variables:
+        code_hex: string
+        repeats: int
+      then:
+        - lambda: |-
+            id(flipper_web_importer).send_rf_dooya_now(code_hex, repeats);
+
+    - action: transmit_rf_raw
+      variables:
+        timings: string
+        repeats: int
+        gap_ms: int
+      then:
+        - lambda: |-
+            id(flipper_web_importer).send_rf_raw_text_now(timings, repeats, gap_ms);
+
+    # Send records already learned or imported into an AR01 slot. These actions
+    # avoid the shared slot selector and are safe to use from HA virtual devices.
+    - action: send_ir_slot
+      supports_response: status
+      variables:
+        slot: int
+      then:
+        - if:
+            condition:
+              lambda: |-
+                return slot >= 0 && slot < 10 &&
+                    id(flipper_web_importer).send_ir_slot((uint8_t) slot);
+            then:
+              - api.respond:
+                  success: true
+            else:
+              - api.respond:
+                  success: false
+                  error_message: "IR slot must be 0..9 and contain a valid signal"
+
+    - action: send_rf_slot
+      supports_response: status
+      variables:
+        slot: int
+        repeats: int
+        gap_ms: int
+      then:
+        - if:
+            condition:
+              lambda: |-
+                return slot >= 0 && slot < 16 && repeats >= 1 && repeats <= 20 &&
+                    gap_ms >= 0 && gap_ms <= 100 &&
+                    id(flipper_web_importer).send_rf_slot(
+                        (uint8_t) slot, (uint32_t) repeats, (uint32_t) gap_ms * 1000U);
+            then:
+              - api.respond:
+                  success: true
+            else:
+              - api.respond:
+                  success: false
+                  error_message: "RF slot must be 0..15, repeats 1..20, gap 0..100 ms, and contain a valid signal"
+
+    - action: send_ir_raw
+      supports_response: status
+      variables:
+        timings: string
+        carrier_hz: int
+        duty_percent: int
+        repeats: int
+      then:
+        - if:
+            condition:
+              lambda: |-
+                return id(flipper_web_importer).send_ir_raw_text_now(
+                    timings, carrier_hz, duty_percent, repeats);
+            then:
+              - api.respond:
+                  success: true
+            else:
+              - api.respond:
+                  success: false
+                  error_message: "Invalid dynamic IR RAW parameters"
+
+    - action: send_ir_nec
+      supports_response: status
+      variables:
+        address: int
+        command: int
+        repeats: int
+      then:
+        - if:
+            condition:
+              lambda: |-
+                return id(flipper_web_importer).send_ir_nec_now(address, command, repeats);
+            then:
+              - api.respond:
+                  success: true
+            else:
+              - api.respond:
+                  success: false
+                  error_message: "Invalid dynamic NEC parameters"
+
+    - action: send_rf_raw
+      supports_response: status
+      variables:
+        timings: string
+        repeats: int
+        gap_ms: int
+      then:
+        - if:
+            condition:
+              lambda: |-
+                return id(flipper_web_importer).send_rf_raw_text_now(timings, repeats, gap_ms);
+            then:
+              - api.respond:
+                  success: true
+            else:
+              - api.respond:
+                  success: false
+                  error_message: "Invalid dynamic RF RAW parameters"
+
+    - action: send_rf_princeton
+      supports_response: status
+      variables:
+        code_hex: string
+        bit_count: int
+        te_us: int
+        guard_multiplier: int
+        repeats: int
+        gap_ms: int
+      then:
+        - if:
+            condition:
+              lambda: |-
+                return id(flipper_web_importer).send_rf_princeton_now(
+                    code_hex, bit_count, te_us, guard_multiplier, repeats, gap_ms);
+            then:
+              - api.respond:
+                  success: true
+            else:
+              - api.respond:
+                  success: false
+                  error_message: "Invalid dynamic Princeton parameters"
+
+    - action: send_rf_dooya
+      supports_response: status
+      variables:
+        code_hex: string
+        repeats: int
+      then:
+        - if:
+            condition:
+              lambda: |-
+                return id(flipper_web_importer).send_rf_dooya_now(code_hex, repeats);
+            then:
+              - api.respond:
+                  success: true
+            else:
+              - api.respond:
+                  success: false
+                  error_message: "Invalid dynamic Dooya parameters"
+  # Only enable BLE tracking when wifi is up and api is connected
+  # Gives single-core ESP32-C3 devices time to manage wifi and authenticate with api
+  on_client_connected:
+     - esp32_ble_tracker.start_scan:
+        continuous: true
+  # Disable BLE tracking when there are no api connections live
+  on_client_disconnected:
+    if:
+      condition:
+        not:
+          api.connected:
+      then:
+        - esp32_ble_tracker.stop_scan:
+
+ota:
+  - platform: esphome
+    id: ota_esphome
+    password: !secret ota_password
+
+logger:
+  baud_rate: 0
+  level: ${log_level}
+
+mdns:
+  disabled: false
+
+web_server:
+  port: 80
+  version: 3
+  js_include: flipper_link.js
+  sorting_groups:
+    - id: group_signal_import
+      name: "Flipper File Import"
+      sorting_weight: 4
+    - id: group_ir_signals
+      name: "IR Signals"
+      sorting_weight: 5
+    - id: group_rf_signals
+      name: "RF 433.92 MHz Signals"
+      sorting_weight: 6
+    - id: group_ha_slot_actions
+      name: "Home Assistant Slot Buttons"
+      sorting_weight: 90
+  auth:
+    type: digest
+    username: !secret web_server_username
+    password: !secret web_server_password
+
+network:
+  enable_ipv6: ${ipv6_enable}
+
+wifi:
+  power_save_mode: NONE
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  ap:
+    ssid: "${friendly_name} Fallback"
+    password: !secret fallback_ap_password
+  # Allow rapid re-connection to previously connected Wi-Fi.
+  fast_connect: "${wifi_fast_connect}"
+  domain: "${dns_domain}"
+
+espnow:
+  id: espnow_component
+  auto_add_peer: false
+  enable_on_boot: true
+
+  # The first valid packet from an unknown remote arrives here. Pairing stores its MAC
+  # in the selected logical slot. All ten AR01V3 units must use the same slot mapping.
+  on_unknown_peer:
+    - lambda: |-
+        const char *const TAG = "espnow_10x10";
+        id(remote_peer_add_pending) = false;
+        id(remote_peer_delete_pending) = false;
+
+        const bool valid_packet = size == 13 &&
+          (data[0] == 0x91 || data[0] == 0x81 || data[0] == 0x80);
+        if (!valid_packet) {
+          ESP_LOGD(TAG, "Ignoring packet from %s, size=%u",
+                   format_mac_address_pretty(info.src_addr).c_str(), size);
+          return;
+        }
+
+        char src[18];
+        snprintf(src, sizeof(src), "%02X:%02X:%02X:%02X:%02X:%02X",
+                 info.src_addr[0], info.src_addr[1], info.src_addr[2],
+                 info.src_addr[3], info.src_addr[4], info.src_addr[5]);
+        id(remote_last_seen).publish_state(src);
+
+        int existing_slot = 0;
+        if (id(remote_paired_1) && memcmp(id(remote_mac_1).data(), info.src_addr, 6) == 0) existing_slot = 1;
+        else if (id(remote_paired_2) && memcmp(id(remote_mac_2).data(), info.src_addr, 6) == 0) existing_slot = 2;
+        else if (id(remote_paired_3) && memcmp(id(remote_mac_3).data(), info.src_addr, 6) == 0) existing_slot = 3;
+        else if (id(remote_paired_4) && memcmp(id(remote_mac_4).data(), info.src_addr, 6) == 0) existing_slot = 4;
+        else if (id(remote_paired_5) && memcmp(id(remote_mac_5).data(), info.src_addr, 6) == 0) existing_slot = 5;
+        else if (id(remote_paired_6) && memcmp(id(remote_mac_6).data(), info.src_addr, 6) == 0) existing_slot = 6;
+        else if (id(remote_paired_7) && memcmp(id(remote_mac_7).data(), info.src_addr, 6) == 0) existing_slot = 7;
+        else if (id(remote_paired_8) && memcmp(id(remote_mac_8).data(), info.src_addr, 6) == 0) existing_slot = 8;
+        else if (id(remote_paired_9) && memcmp(id(remote_mac_9).data(), info.src_addr, 6) == 0) existing_slot = 9;
+        else if (id(remote_paired_10) && memcmp(id(remote_mac_10).data(), info.src_addr, 6) == 0) existing_slot = 10;
+        if (existing_slot != 0) {
+          for (size_t i = 0; i < 6; i++) id(remote_peer_add_mac)[i] = info.src_addr[i];
+          id(remote_peer_add_pending) = true;
+          if (id(remote_pairing)) {
+            id(remote_pairing) = false;
+            char status[48];
+            snprintf(status, sizeof(status), "Already paired as Pilot %d", existing_slot);
+            id(remote_pairing_status).publish_state(status);
+          }
+          ESP_LOGI(TAG, "Restoring known remote %s from slot %d", src, existing_slot);
+          return;
+        }
+
+        if (!id(remote_pairing)) {
+          ESP_LOGD(TAG, "Unpaired remote %s seen; enable pairing first", src);
+          return;
+        }
+
+        const int slot = id(remote_pairing_slot);
+        if (slot < 1 || slot > 10) {
+          id(remote_pairing) = false;
+          id(remote_pairing_status).publish_state("Invalid pairing slot");
+          return;
+        }
+
+        if (slot == 1 && id(remote_paired_1)) {
+          id(remote_peer_delete_mac) = id(remote_mac_1);
+          id(remote_peer_delete_pending) = true;
+        }
+        else if (slot == 2 && id(remote_paired_2)) {
+          id(remote_peer_delete_mac) = id(remote_mac_2);
+          id(remote_peer_delete_pending) = true;
+        }
+        else if (slot == 3 && id(remote_paired_3)) {
+          id(remote_peer_delete_mac) = id(remote_mac_3);
+          id(remote_peer_delete_pending) = true;
+        }
+        else if (slot == 4 && id(remote_paired_4)) {
+          id(remote_peer_delete_mac) = id(remote_mac_4);
+          id(remote_peer_delete_pending) = true;
+        }
+        else if (slot == 5 && id(remote_paired_5)) {
+          id(remote_peer_delete_mac) = id(remote_mac_5);
+          id(remote_peer_delete_pending) = true;
+        }
+        else if (slot == 6 && id(remote_paired_6)) {
+          id(remote_peer_delete_mac) = id(remote_mac_6);
+          id(remote_peer_delete_pending) = true;
+        }
+        else if (slot == 7 && id(remote_paired_7)) {
+          id(remote_peer_delete_mac) = id(remote_mac_7);
+          id(remote_peer_delete_pending) = true;
+        }
+        else if (slot == 8 && id(remote_paired_8)) {
+          id(remote_peer_delete_mac) = id(remote_mac_8);
+          id(remote_peer_delete_pending) = true;
+        }
+        else if (slot == 9 && id(remote_paired_9)) {
+          id(remote_peer_delete_mac) = id(remote_mac_9);
+          id(remote_peer_delete_pending) = true;
+        }
+        else if (slot == 10 && id(remote_paired_10)) {
+          id(remote_peer_delete_mac) = id(remote_mac_10);
+          id(remote_peer_delete_pending) = true;
+        }
+
+        std::array<uint8_t, 6> new_mac{info.src_addr[0], info.src_addr[1], info.src_addr[2],
+                                       info.src_addr[3], info.src_addr[4], info.src_addr[5]};
+        if (slot == 1) {
+          id(remote_mac_1) = new_mac;
+          id(remote_paired_1) = true;
+          id(remote_last_seq_1) = 0xFFFFFFFF;
+          id(remote_paired_text_1).publish_state(src);
+        }
+        else if (slot == 2) {
+          id(remote_mac_2) = new_mac;
+          id(remote_paired_2) = true;
+          id(remote_last_seq_2) = 0xFFFFFFFF;
+          id(remote_paired_text_2).publish_state(src);
+        }
+        else if (slot == 3) {
+          id(remote_mac_3) = new_mac;
+          id(remote_paired_3) = true;
+          id(remote_last_seq_3) = 0xFFFFFFFF;
+          id(remote_paired_text_3).publish_state(src);
+        }
+        else if (slot == 4) {
+          id(remote_mac_4) = new_mac;
+          id(remote_paired_4) = true;
+          id(remote_last_seq_4) = 0xFFFFFFFF;
+          id(remote_paired_text_4).publish_state(src);
+        }
+        else if (slot == 5) {
+          id(remote_mac_5) = new_mac;
+          id(remote_paired_5) = true;
+          id(remote_last_seq_5) = 0xFFFFFFFF;
+          id(remote_paired_text_5).publish_state(src);
+        }
+        else if (slot == 6) {
+          id(remote_mac_6) = new_mac;
+          id(remote_paired_6) = true;
+          id(remote_last_seq_6) = 0xFFFFFFFF;
+          id(remote_paired_text_6).publish_state(src);
+        }
+        else if (slot == 7) {
+          id(remote_mac_7) = new_mac;
+          id(remote_paired_7) = true;
+          id(remote_last_seq_7) = 0xFFFFFFFF;
+          id(remote_paired_text_7).publish_state(src);
+        }
+        else if (slot == 8) {
+          id(remote_mac_8) = new_mac;
+          id(remote_paired_8) = true;
+          id(remote_last_seq_8) = 0xFFFFFFFF;
+          id(remote_paired_text_8).publish_state(src);
+        }
+        else if (slot == 9) {
+          id(remote_mac_9) = new_mac;
+          id(remote_paired_9) = true;
+          id(remote_last_seq_9) = 0xFFFFFFFF;
+          id(remote_paired_text_9).publish_state(src);
+        }
+        else if (slot == 10) {
+          id(remote_mac_10) = new_mac;
+          id(remote_paired_10) = true;
+          id(remote_last_seq_10) = 0xFFFFFFFF;
+          id(remote_paired_text_10).publish_state(src);
+        }
+
+        id(remote_peer_add_mac) = new_mac;
+        id(remote_peer_add_pending) = true;
+        id(remote_pairing) = false;
+        char status[48];
+        snprintf(status, sizeof(status), "Pilot %d paired", slot);
+        id(remote_pairing_status).publish_state(status);
+        ESP_LOGI(TAG, "Paired remote %s as Pilot %d", src, slot);
+
+    - if:
+        condition:
+          lambda: 'return id(remote_peer_delete_pending);'
+        then:
+          - espnow.peer.delete:
+              id: espnow_component
+              address: !lambda 'return id(remote_peer_delete_mac);'
+    - if:
+        condition:
+          lambda: 'return id(remote_peer_add_pending);'
+        then:
+          - espnow.peer.add:
+              id: espnow_component
+              address: !lambda 'return id(remote_peer_add_mac);'
+    - lambda: |-
+        id(remote_peer_add_pending) = false;
+        id(remote_peer_delete_pending) = false;
+
+  on_receive:
+    - if:
+        condition:
+          lambda: |-
+            const char *const TAG = "espnow_10x10";
+            const bool valid_packet = size == 13 &&
+              (data[0] == 0x91 || data[0] == 0x81 || data[0] == 0x80);
+            if (!valid_packet) return false;
+
+            int slot = 0;
+            if (id(remote_paired_1) && memcmp(id(remote_mac_1).data(), info.src_addr, 6) == 0) slot = 1;
+            else if (id(remote_paired_2) && memcmp(id(remote_mac_2).data(), info.src_addr, 6) == 0) slot = 2;
+            else if (id(remote_paired_3) && memcmp(id(remote_mac_3).data(), info.src_addr, 6) == 0) slot = 3;
+            else if (id(remote_paired_4) && memcmp(id(remote_mac_4).data(), info.src_addr, 6) == 0) slot = 4;
+            else if (id(remote_paired_5) && memcmp(id(remote_mac_5).data(), info.src_addr, 6) == 0) slot = 5;
+            else if (id(remote_paired_6) && memcmp(id(remote_mac_6).data(), info.src_addr, 6) == 0) slot = 6;
+            else if (id(remote_paired_7) && memcmp(id(remote_mac_7).data(), info.src_addr, 6) == 0) slot = 7;
+            else if (id(remote_paired_8) && memcmp(id(remote_mac_8).data(), info.src_addr, 6) == 0) slot = 8;
+            else if (id(remote_paired_9) && memcmp(id(remote_mac_9).data(), info.src_addr, 6) == 0) slot = 9;
+            else if (id(remote_paired_10) && memcmp(id(remote_mac_10).data(), info.src_addr, 6) == 0) slot = 10;
+            if (slot == 0) return false;
+
+            const uint32_t seq = uint32_t(data[1]) | (uint32_t(data[2]) << 8) |
+                                 (uint32_t(data[3]) << 16) | (uint32_t(data[4]) << 24);
+            const uint8_t button = data[6];
+            const uint8_t battery = data[8];
+
+            if (slot == 1) {
+              id(remote_battery_1).publish_state(battery);
+              if (seq == id(remote_last_seq_1)) return false;
+              id(remote_last_seq_1) = seq;
+            }
+            else if (slot == 2) {
+              id(remote_battery_2).publish_state(battery);
+              if (seq == id(remote_last_seq_2)) return false;
+              id(remote_last_seq_2) = seq;
+            }
+            else if (slot == 3) {
+              id(remote_battery_3).publish_state(battery);
+              if (seq == id(remote_last_seq_3)) return false;
+              id(remote_last_seq_3) = seq;
+            }
+            else if (slot == 4) {
+              id(remote_battery_4).publish_state(battery);
+              if (seq == id(remote_last_seq_4)) return false;
+              id(remote_last_seq_4) = seq;
+            }
+            else if (slot == 5) {
+              id(remote_battery_5).publish_state(battery);
+              if (seq == id(remote_last_seq_5)) return false;
+              id(remote_last_seq_5) = seq;
+            }
+            else if (slot == 6) {
+              id(remote_battery_6).publish_state(battery);
+              if (seq == id(remote_last_seq_6)) return false;
+              id(remote_last_seq_6) = seq;
+            }
+            else if (slot == 7) {
+              id(remote_battery_7).publish_state(battery);
+              if (seq == id(remote_last_seq_7)) return false;
+              id(remote_last_seq_7) = seq;
+            }
+            else if (slot == 8) {
+              id(remote_battery_8).publish_state(battery);
+              if (seq == id(remote_last_seq_8)) return false;
+              id(remote_last_seq_8) = seq;
+            }
+            else if (slot == 9) {
+              id(remote_battery_9).publish_state(battery);
+              if (seq == id(remote_last_seq_9)) return false;
+              id(remote_last_seq_9) = seq;
+            }
+            else if (slot == 10) {
+              id(remote_battery_10).publish_state(battery);
+              if (seq == id(remote_last_seq_10)) return false;
+              id(remote_last_seq_10) = seq;
+            }
+
+            char src[18];
+            snprintf(src, sizeof(src), "%02X:%02X:%02X:%02X:%02X:%02X",
+                     info.src_addr[0], info.src_addr[1], info.src_addr[2],
+                     info.src_addr[3], info.src_addr[4], info.src_addr[5]);
+            id(remote_last_seen).publish_state(src);
+            id(remote_rx_slot) = slot;
+            id(remote_rx_seq) = seq;
+            id(remote_rx_button) = button;
+            id(remote_rx_battery) = battery;
+            ESP_LOGD(TAG, "pilot=%d button=%u seq=%lu battery=%u",
+                     slot, unsigned(button), static_cast<unsigned long>(seq), unsigned(battery));
+            return true;
+        then:
+          - script.execute:
+              id: remote_handle_packet
+              remote_slot: !lambda 'return id(remote_rx_slot);'
+              sequence: !lambda 'return std::to_string(id(remote_rx_seq));'
+              button_code: !lambda 'return id(remote_rx_button);'
+              battery: !lambda 'return id(remote_rx_battery);'
+
+  # Broadcast packets can be delivered through a separate callback. The local sequence
+  # check ensures one physical packet is handled once per AR01V3.
+  on_broadcast:
+    - if:
+        condition:
+          lambda: |-
+            const char *const TAG = "espnow_10x10";
+            const bool valid_packet = size == 13 &&
+              (data[0] == 0x91 || data[0] == 0x81 || data[0] == 0x80);
+            if (!valid_packet) return false;
+
+            int slot = 0;
+            if (id(remote_paired_1) && memcmp(id(remote_mac_1).data(), info.src_addr, 6) == 0) slot = 1;
+            else if (id(remote_paired_2) && memcmp(id(remote_mac_2).data(), info.src_addr, 6) == 0) slot = 2;
+            else if (id(remote_paired_3) && memcmp(id(remote_mac_3).data(), info.src_addr, 6) == 0) slot = 3;
+            else if (id(remote_paired_4) && memcmp(id(remote_mac_4).data(), info.src_addr, 6) == 0) slot = 4;
+            else if (id(remote_paired_5) && memcmp(id(remote_mac_5).data(), info.src_addr, 6) == 0) slot = 5;
+            else if (id(remote_paired_6) && memcmp(id(remote_mac_6).data(), info.src_addr, 6) == 0) slot = 6;
+            else if (id(remote_paired_7) && memcmp(id(remote_mac_7).data(), info.src_addr, 6) == 0) slot = 7;
+            else if (id(remote_paired_8) && memcmp(id(remote_mac_8).data(), info.src_addr, 6) == 0) slot = 8;
+            else if (id(remote_paired_9) && memcmp(id(remote_mac_9).data(), info.src_addr, 6) == 0) slot = 9;
+            else if (id(remote_paired_10) && memcmp(id(remote_mac_10).data(), info.src_addr, 6) == 0) slot = 10;
+            if (slot == 0) return false;
+
+            const uint32_t seq = uint32_t(data[1]) | (uint32_t(data[2]) << 8) |
+                                 (uint32_t(data[3]) << 16) | (uint32_t(data[4]) << 24);
+            const uint8_t button = data[6];
+            const uint8_t battery = data[8];
+
+            if (slot == 1) {
+              id(remote_battery_1).publish_state(battery);
+              if (seq == id(remote_last_seq_1)) return false;
+              id(remote_last_seq_1) = seq;
+            }
+            else if (slot == 2) {
+              id(remote_battery_2).publish_state(battery);
+              if (seq == id(remote_last_seq_2)) return false;
+              id(remote_last_seq_2) = seq;
+            }
+            else if (slot == 3) {
+              id(remote_battery_3).publish_state(battery);
+              if (seq == id(remote_last_seq_3)) return false;
+              id(remote_last_seq_3) = seq;
+            }
+            else if (slot == 4) {
+              id(remote_battery_4).publish_state(battery);
+              if (seq == id(remote_last_seq_4)) return false;
+              id(remote_last_seq_4) = seq;
+            }
+            else if (slot == 5) {
+              id(remote_battery_5).publish_state(battery);
+              if (seq == id(remote_last_seq_5)) return false;
+              id(remote_last_seq_5) = seq;
+            }
+            else if (slot == 6) {
+              id(remote_battery_6).publish_state(battery);
+              if (seq == id(remote_last_seq_6)) return false;
+              id(remote_last_seq_6) = seq;
+            }
+            else if (slot == 7) {
+              id(remote_battery_7).publish_state(battery);
+              if (seq == id(remote_last_seq_7)) return false;
+              id(remote_last_seq_7) = seq;
+            }
+            else if (slot == 8) {
+              id(remote_battery_8).publish_state(battery);
+              if (seq == id(remote_last_seq_8)) return false;
+              id(remote_last_seq_8) = seq;
+            }
+            else if (slot == 9) {
+              id(remote_battery_9).publish_state(battery);
+              if (seq == id(remote_last_seq_9)) return false;
+              id(remote_last_seq_9) = seq;
+            }
+            else if (slot == 10) {
+              id(remote_battery_10).publish_state(battery);
+              if (seq == id(remote_last_seq_10)) return false;
+              id(remote_last_seq_10) = seq;
+            }
+
+            char src[18];
+            snprintf(src, sizeof(src), "%02X:%02X:%02X:%02X:%02X:%02X",
+                     info.src_addr[0], info.src_addr[1], info.src_addr[2],
+                     info.src_addr[3], info.src_addr[4], info.src_addr[5]);
+            id(remote_last_seen).publish_state(src);
+            id(remote_rx_slot) = slot;
+            id(remote_rx_seq) = seq;
+            id(remote_rx_button) = button;
+            id(remote_rx_battery) = battery;
+            ESP_LOGD(TAG, "Broadcast pilot=%d button=%u seq=%lu battery=%u",
+                     slot, unsigned(button), static_cast<unsigned long>(seq), unsigned(battery));
+            return true;
+        then:
+          - script.execute:
+              id: remote_handle_packet
+              remote_slot: !lambda 'return id(remote_rx_slot);'
+              sequence: !lambda 'return std::to_string(id(remote_rx_seq));'
+              button_code: !lambda 'return id(remote_rx_button);'
+              battery: !lambda 'return id(remote_rx_battery);'
+
+esp32_ble_tracker:
+  scan_parameters:
+    # Don't auto start BLE scanning, we control it in the `api` block's automation.
+    continuous: false
+    active: true  # send scan-request packets to gather more info, like device name for some devices.
+    interval: 320ms  # default 320ms - how long to spend on each advert channel
+    window: 30ms
+    # If the device cannot keep up or becomes unstable, reduce the "window" setting. This may be
+    # required if your device is controlling other sensors or doing PWM for lights etc.
+
+bluetooth_proxy:
+  active: true
+  # Preserve active BLE proxying with a lower peak RAM requirement.
+  connection_slots: 2
+
+captive_portal:
+
+esp32_improv:
+  authorizer: none
+
+
+# Use the vendored Flash storage component included in this package.
+# This avoids fetching mutable code from GitHub during validation or compilation.
+external_components:
+  - source:
+      type: local
+      path: components
+    components: [Flash_comp, flipper_importer]
+
+remote_receiver:
+  - pin:
+      number: ${RF_RX_PIN}
+      inverted: true
+    # Athom v3.0.7 vendor baseline for AR01V3 GPIO19. Learning is accepted only
+    # after ESPHome has decoded a fixed-code RC-Switch frame; ambient RAW chatter
+    # is never written to a slot.
+    dump: rc_switch
+    filter: 50us
+    idle: 10ms
+    tolerance: 50%
+    id: rf_receiver
+    on_rc_switch:
+      - lambda: |-
+          if (!id(is_rf_learning_mode)) return;
+          if (id(rf_candidate_count) > 0 &&
+              id(rf_candidate_protocol) == x.protocol &&
+              id(rf_candidate_code) == x.code) {
+            id(rf_candidate_count)++;
+          } else {
+            id(rf_candidate_protocol) = x.protocol;
+            id(rf_candidate_code) = x.code;
+            id(rf_candidate_count) = 1;
+          }
+          ESP_LOGI("RF_LEARNING", "Candidate %u/3: protocol=%u code=0x%llX",
+                   id(rf_candidate_count), x.protocol, (unsigned long long) x.code);
+          if (id(rf_candidate_count) < 3) return;
+
+          id(is_rf_learning_mode) = false;
+          const bool saved = id(flipper_web_importer).save_rf_rc_switch(
+              (uint8_t) id(rf_signal_select_index), id(rf_candidate_code),
+              id(rf_candidate_protocol), 5);
+          if (saved) {
+            char message[128];
+            if (id(rf_candidate_protocol) == 6)
+              std::snprintf(message, sizeof(message),
+                            "Learned RX protocol 6 code 0x%llX; saved as Princeton TX TE403",
+                            (unsigned long long) id(rf_candidate_code));
+            else
+              std::snprintf(message, sizeof(message),
+                            "Learned RC-Switch protocol %u, code 0x%llX (3 matches, 24-bit)",
+                            id(rf_candidate_protocol),
+                            (unsigned long long) id(rf_candidate_code));
+            id(rf_status_text).publish_state(message);
+            ESP_LOGI("RF_LEARNING", "%s", message);
+          } else {
+            id(rf_status_text).publish_state("RF save failed");
+            ESP_LOGE("RF_LEARNING", "Could not save decoded RF signal");
+          }
+
+  - pin:
+      number: ${IR_RX_PIN}
+      inverted: true
+    dump: all
+    tolerance: 25%
+    idle: 65500us
+    clock_resolution: "500000"
+    id: ir_receiver
+    on_nec:
+      - lambda: |-
+          if (!id(is_learning_mode)) return;
+          id(ir_pending_nec_valid) = true;
+          id(ir_pending_nec_address) = x.address;
+          id(ir_pending_nec_command) = x.command;
+          ESP_LOGI("IR_LEARNING", "Decoded NEC address=0x%04X command=0x%04X",
+                   x.address, x.command);
+      - script.execute: ir_process_pending
+    on_raw:
+      - lambda: |-
+          if (!id(is_learning_mode)) return;
+          if ((int32_t) (millis() - id(ir_learn_deadline)) >= 0) {
+            id(is_learning_mode) = false;
+            id(status_text).publish_state("Learning timeout");
+            return;
+          }
+          if (x.size() > id(filter_size)) id(ir_pending_raw) = x;
+      - script.execute: ir_process_pending
+
+remote_transmitter:
+  - pin:
+      number: ${RF_TX_PIN}
+    # OOK modulation for RF433 — keep duty at 100%
+    carrier_duty_percent: 100%
+    non_blocking: true
+    id: rf_transmitter
+
+  - pin:
+      number: ${IR_TX_PIN}
+      inverted: false
+    carrier_duty_percent: 50%
+    non_blocking: true
+    id: ir_transmitter
+
+infrared:
+  - platform: ir_rf_proxy
+    name: IR Proxy Transmitter
+    id: ir_proxy_transmitter
+    remote_transmitter_id: ir_transmitter
+
+  - platform: ir_rf_proxy
+    name: IR Proxy Receiver
+    id: ir_proxy_receiver
+    receiver_frequency: 38kHz
+    remote_receiver_id: ir_receiver
+
+  # RF transmitter instance
+radio_frequency:
+  - platform: ir_rf_proxy
+    name: 433MHz RF Transmitter
+    id: rf_proxy_transmitter
+    frequency: 433.92MHz
+    remote_transmitter_id: rf_transmitter
+
+  - platform: ir_rf_proxy
+    name: 433MHz RF Receiver
+    id: rf_proxy_receiver
+    frequency: 433.92MHz
+    remote_receiver_id: rf_receiver
+
+climate:
+  - id: "AC"
+    name: "AC"
+    platform: ${AC_Platform_name}
+    transmitter_id: ir_transmitter
+    receiver_id: ir_receiver
+
+binary_sensor:
+  - platform: status
+    name: "Status"
+    entity_category: "diagnostic"
+
+  - platform: gpio
+    pin:
+      number: ${Button_PIN}
+      mode:
+        input: true
+      inverted: true
+    name: "Button"
+    disabled_by_default: true
+    on_multi_click:
+      - timing:
+          - ON for at least 4s
+        then:
+          - button.press: Reset
+
+sensor:
+  - platform: uptime
+    name: "Uptime Sensor"
+    id: uptime_sensor
+    type:
+      timestamp
+    entity_category: "diagnostic"
+
+  - platform: wifi_signal
+    name: "WiFi Signal dB"
+    id: wifi_signal_db
+    update_interval: 60s
+    entity_category: "diagnostic"
+
+  - platform: copy
+    source_id: wifi_signal_db
+    name: "WiFi Signal Percent"
+    filters:
+      - lambda: return min(max(2 * (x + 100.0), 0.0), 100.0);
+    unit_of_measurement: "Signal %"
+    entity_category: "diagnostic"
+    device_class: ""
+
+  - platform: template
+    name: "ESP-NOW Pilot 1 Battery"
+    id: remote_battery_1
+    unit_of_measurement: "%"
+    accuracy_decimals: 0
+    update_interval: never
+    device_class: battery
+    entity_category: diagnostic
+
+  - platform: template
+    name: "ESP-NOW Pilot 2 Battery"
+    id: remote_battery_2
+    unit_of_measurement: "%"
+    accuracy_decimals: 0
+    update_interval: never
+    device_class: battery
+    entity_category: diagnostic
+
+  - platform: template
+    name: "ESP-NOW Pilot 3 Battery"
+    id: remote_battery_3
+    unit_of_measurement: "%"
+    accuracy_decimals: 0
+    update_interval: never
+    device_class: battery
+    entity_category: diagnostic
+
+  - platform: template
+    name: "ESP-NOW Pilot 4 Battery"
+    id: remote_battery_4
+    unit_of_measurement: "%"
+    accuracy_decimals: 0
+    update_interval: never
+    device_class: battery
+    entity_category: diagnostic
+
+  - platform: template
+    name: "ESP-NOW Pilot 5 Battery"
+    id: remote_battery_5
+    unit_of_measurement: "%"
+    accuracy_decimals: 0
+    update_interval: never
+    device_class: battery
+    entity_category: diagnostic
+
+  - platform: template
+    name: "ESP-NOW Pilot 6 Battery"
+    id: remote_battery_6
+    unit_of_measurement: "%"
+    accuracy_decimals: 0
+    update_interval: never
+    device_class: battery
+    entity_category: diagnostic
+
+  - platform: template
+    name: "ESP-NOW Pilot 7 Battery"
+    id: remote_battery_7
+    unit_of_measurement: "%"
+    accuracy_decimals: 0
+    update_interval: never
+    device_class: battery
+    entity_category: diagnostic
+
+  - platform: template
+    name: "ESP-NOW Pilot 8 Battery"
+    id: remote_battery_8
+    unit_of_measurement: "%"
+    accuracy_decimals: 0
+    update_interval: never
+    device_class: battery
+    entity_category: diagnostic
+
+  - platform: template
+    name: "ESP-NOW Pilot 9 Battery"
+    id: remote_battery_9
+    unit_of_measurement: "%"
+    accuracy_decimals: 0
+    update_interval: never
+    device_class: battery
+    entity_category: diagnostic
+
+  - platform: template
+    name: "ESP-NOW Pilot 10 Battery"
+    id: remote_battery_10
+    unit_of_measurement: "%"
+    accuracy_decimals: 0
+    update_interval: never
+    device_class: battery
+    entity_category: diagnostic
+  - platform: template
+    name: "ESP-NOW Last Button Code"
+    id: remote_button_code_sensor
+    accuracy_decimals: 0
+    update_interval: never
+    entity_category: diagnostic
+
+button:
+  - platform: template
+    name: "Flipper Import Page"
+    id: flipper_import_button
+    icon: mdi:file-upload
+    web_server:
+      sorting_group_id: group_signal_import
+      sorting_weight: 1
+
+  - platform: restart
+    name: "Restart"
+    entity_category: config
+
+  - platform: factory_reset
+    name: "Factory Reset"
+    id: Reset
+    entity_category: config
+
+  - platform: safe_mode
+    name: "Safe Mode"
+    internal: false
+    entity_category: config
+
+  # IR learning button
+  - platform: template
+    name: "IR Learn"
+    icon: mdi:remote-tv
+    web_server:
+      sorting_group_id: group_ir_signals
+      sorting_weight: 30
+    on_press:
+      - lambda: |-
+          id(ir_pending_raw).clear();
+          id(ir_pending_nec_valid) = false;
+          id(is_learning_mode) = true;
+          id(ir_learn_deadline) = millis() + 20000;
+          ESP_LOGI("IR_LEARNING", "Learning mode activated for slot %d", id(signal_select_index));
+          id(status_text).publish_state("Ready: press the IR remote button");
+      - script.execute: ir_learning_timeout
+
+  # IR send button
+  - platform: template
+    name: "IR Send"
+    icon: mdi:send
+    web_server:
+      sorting_group_id: group_ir_signals
+      sorting_weight: 40
+    on_press:
+      - script.execute: send_raw_signal
+
+  # Clear the signal in the current slot
+  - platform: template
+    name: "IR Clear Slot"
+    icon: mdi:delete
+    web_server:
+      sorting_group_id: group_ir_signals
+      sorting_weight: 50
+    on_press:
+      - lambda: |-
+          id(flipper_web_importer).clear_ir_slot((uint8_t) id(signal_select_index));
+          ESP_LOGI("IR_LEARNING", "Cleared slot %d", id(signal_select_index));
+
+  # RF433 one-shot learning button
+  - platform: template
+    name: "RF Learn"
+    icon: mdi:radio-tower
+    web_server:
+      sorting_group_id: group_rf_signals
+      sorting_weight: 30
+    on_press:
+      - lambda: |-
+          id(rf_candidate_code) = 0;
+          id(rf_candidate_protocol) = 0;
+          id(rf_candidate_count) = 0;
+          id(is_rf_learning_mode) = true;
+          ESP_LOGI("RF_LEARNING", "RC-Switch learning activated for logical slot %d",
+                   id(rf_signal_select_index));
+          id(rf_status_text).publish_state("Ready: hold the fixed-code RF button for about 1 second");
+      - script.execute: rf_learning_timeout
+
+  # RF433 send button
+  - platform: template
+    name: "RF Send"
+    icon: mdi:send
+    web_server:
+      sorting_group_id: group_rf_signals
+      sorting_weight: 40
+    on_press:
+      - script.execute: send_raw_rf_signal
+
+  # Clear the RF signal in the current slot
+  - platform: template
+    name: "RF Clear Slot"
+    icon: mdi:delete
+    web_server:
+      sorting_group_id: group_rf_signals
+      sorting_weight: 50
+    on_press:
+      - lambda: |-
+          id(flipper_web_importer).clear_rf_slot((uint8_t) id(rf_signal_select_index));
+          ESP_LOGI("RF_LEARNING", "Cleared logical slot %d", id(rf_signal_select_index));
+
+  - platform: template
+    name: "Send IR Slot 0"
+    icon: mdi:remote
+    device_id: ha_slot_actions_device
+    web_server:
+      sorting_group_id: group_ha_slot_actions
+      sorting_weight: 0
+    on_press:
+      - lambda: |-
+          id(flipper_web_importer).send_ir_slot(0);
+
+  - platform: template
+    name: "Send IR Slot 1"
+    icon: mdi:remote
+    device_id: ha_slot_actions_device
+    web_server:
+      sorting_group_id: group_ha_slot_actions
+      sorting_weight: 1
+    on_press:
+      - lambda: |-
+          id(flipper_web_importer).send_ir_slot(1);
+
+  - platform: template
+    name: "Send IR Slot 2"
+    icon: mdi:remote
+    device_id: ha_slot_actions_device
+    web_server:
+      sorting_group_id: group_ha_slot_actions
+      sorting_weight: 2
+    on_press:
+      - lambda: |-
+          id(flipper_web_importer).send_ir_slot(2);
+
+  - platform: template
+    name: "Send IR Slot 3"
+    icon: mdi:remote
+    device_id: ha_slot_actions_device
+    web_server:
+      sorting_group_id: group_ha_slot_actions
+      sorting_weight: 3
+    on_press:
+      - lambda: |-
+          id(flipper_web_importer).send_ir_slot(3);
+
+  - platform: template
+    name: "Send IR Slot 4"
+    icon: mdi:remote
+    device_id: ha_slot_actions_device
+    web_server:
+      sorting_group_id: group_ha_slot_actions
+      sorting_weight: 4
+    on_press:
+      - lambda: |-
+          id(flipper_web_importer).send_ir_slot(4);
+
+  - platform: template
+    name: "Send IR Slot 5"
+    icon: mdi:remote
+    device_id: ha_slot_actions_device
+    web_server:
+      sorting_group_id: group_ha_slot_actions
+      sorting_weight: 5
+    on_press:
+      - lambda: |-
+          id(flipper_web_importer).send_ir_slot(5);
+
+  - platform: template
+    name: "Send IR Slot 6"
+    icon: mdi:remote
+    device_id: ha_slot_actions_device
+    web_server:
+      sorting_group_id: group_ha_slot_actions
+      sorting_weight: 6
+    on_press:
+      - lambda: |-
+          id(flipper_web_importer).send_ir_slot(6);
+
+  - platform: template
+    name: "Send IR Slot 7"
+    icon: mdi:remote
+    device_id: ha_slot_actions_device
+    web_server:
+      sorting_group_id: group_ha_slot_actions
+      sorting_weight: 7
+    on_press:
+      - lambda: |-
+          id(flipper_web_importer).send_ir_slot(7);
+
+  - platform: template
+    name: "Send IR Slot 8"
+    icon: mdi:remote
+    device_id: ha_slot_actions_device
+    web_server:
+      sorting_group_id: group_ha_slot_actions
+      sorting_weight: 8
+    on_press:
+      - lambda: |-
+          id(flipper_web_importer).send_ir_slot(8);
+
+  - platform: template
+    name: "Send IR Slot 9"
+    icon: mdi:remote
+    device_id: ha_slot_actions_device
+    web_server:
+      sorting_group_id: group_ha_slot_actions
+      sorting_weight: 9
+    on_press:
+      - lambda: |-
+          id(flipper_web_importer).send_ir_slot(9);
+
+  - platform: template
+    name: "Send RF Slot 0"
+    icon: mdi:radio-tower
+    device_id: ha_slot_actions_device
+    web_server:
+      sorting_group_id: group_ha_slot_actions
+      sorting_weight: 20
+    on_press:
+      - lambda: |-
+          id(flipper_web_importer).send_rf_slot(0, 0, 0);
+
+  - platform: template
+    name: "Send RF Slot 1"
+    icon: mdi:radio-tower
+    device_id: ha_slot_actions_device
+    web_server:
+      sorting_group_id: group_ha_slot_actions
+      sorting_weight: 21
+    on_press:
+      - lambda: |-
+          id(flipper_web_importer).send_rf_slot(1, 0, 0);
+
+  - platform: template
+    name: "Send RF Slot 2"
+    icon: mdi:radio-tower
+    device_id: ha_slot_actions_device
+    web_server:
+      sorting_group_id: group_ha_slot_actions
+      sorting_weight: 22
+    on_press:
+      - lambda: |-
+          id(flipper_web_importer).send_rf_slot(2, 0, 0);
+
+  - platform: template
+    name: "Send RF Slot 3"
+    icon: mdi:radio-tower
+    device_id: ha_slot_actions_device
+    web_server:
+      sorting_group_id: group_ha_slot_actions
+      sorting_weight: 23
+    on_press:
+      - lambda: |-
+          id(flipper_web_importer).send_rf_slot(3, 0, 0);
+
+  - platform: template
+    name: "Send RF Slot 4"
+    icon: mdi:radio-tower
+    device_id: ha_slot_actions_device
+    web_server:
+      sorting_group_id: group_ha_slot_actions
+      sorting_weight: 24
+    on_press:
+      - lambda: |-
+          id(flipper_web_importer).send_rf_slot(4, 0, 0);
+
+  - platform: template
+    name: "Send RF Slot 5"
+    icon: mdi:radio-tower
+    device_id: ha_slot_actions_device
+    web_server:
+      sorting_group_id: group_ha_slot_actions
+      sorting_weight: 25
+    on_press:
+      - lambda: |-
+          id(flipper_web_importer).send_rf_slot(5, 0, 0);
+
+  - platform: template
+    name: "Send RF Slot 6"
+    icon: mdi:radio-tower
+    device_id: ha_slot_actions_device
+    web_server:
+      sorting_group_id: group_ha_slot_actions
+      sorting_weight: 26
+    on_press:
+      - lambda: |-
+          id(flipper_web_importer).send_rf_slot(6, 0, 0);
+
+  - platform: template
+    name: "Send RF Slot 7"
+    icon: mdi:radio-tower
+    device_id: ha_slot_actions_device
+    web_server:
+      sorting_group_id: group_ha_slot_actions
+      sorting_weight: 27
+    on_press:
+      - lambda: |-
+          id(flipper_web_importer).send_rf_slot(7, 0, 0);
+
+  - platform: template
+    name: "Send RF Slot 8"
+    icon: mdi:radio-tower
+    device_id: ha_slot_actions_device
+    web_server:
+      sorting_group_id: group_ha_slot_actions
+      sorting_weight: 28
+    on_press:
+      - lambda: |-
+          id(flipper_web_importer).send_rf_slot(8, 0, 0);
+
+  - platform: template
+    name: "Send RF Slot 9"
+    icon: mdi:radio-tower
+    device_id: ha_slot_actions_device
+    web_server:
+      sorting_group_id: group_ha_slot_actions
+      sorting_weight: 29
+    on_press:
+      - lambda: |-
+          id(flipper_web_importer).send_rf_slot(9, 0, 0);
+
+  - platform: template
+    name: "Send RF Slot 10"
+    icon: mdi:radio-tower
+    device_id: ha_slot_actions_device
+    web_server:
+      sorting_group_id: group_ha_slot_actions
+      sorting_weight: 30
+    on_press:
+      - lambda: |-
+          id(flipper_web_importer).send_rf_slot(10, 0, 0);
+
+  - platform: template
+    name: "Send RF Slot 11"
+    icon: mdi:radio-tower
+    device_id: ha_slot_actions_device
+    web_server:
+      sorting_group_id: group_ha_slot_actions
+      sorting_weight: 31
+    on_press:
+      - lambda: |-
+          id(flipper_web_importer).send_rf_slot(11, 0, 0);
+
+  - platform: template
+    name: "Send RF Slot 12"
+    icon: mdi:radio-tower
+    device_id: ha_slot_actions_device
+    web_server:
+      sorting_group_id: group_ha_slot_actions
+      sorting_weight: 32
+    on_press:
+      - lambda: |-
+          id(flipper_web_importer).send_rf_slot(12, 0, 0);
+
+  - platform: template
+    name: "Send RF Slot 13"
+    icon: mdi:radio-tower
+    device_id: ha_slot_actions_device
+    web_server:
+      sorting_group_id: group_ha_slot_actions
+      sorting_weight: 33
+    on_press:
+      - lambda: |-
+          id(flipper_web_importer).send_rf_slot(13, 0, 0);
+
+  - platform: template
+    name: "Send RF Slot 14"
+    icon: mdi:radio-tower
+    device_id: ha_slot_actions_device
+    web_server:
+      sorting_group_id: group_ha_slot_actions
+      sorting_weight: 34
+    on_press:
+      - lambda: |-
+          id(flipper_web_importer).send_rf_slot(14, 0, 0);
+
+  - platform: template
+    name: "Send RF Slot 15"
+    icon: mdi:radio-tower
+    device_id: ha_slot_actions_device
+    web_server:
+      sorting_group_id: group_ha_slot_actions
+      sorting_weight: 35
+    on_press:
+      - lambda: |-
+          id(flipper_web_importer).send_rf_slot(15, 0, 0);
+
+  - platform: template
+    name: "Pair ESP-NOW Remote"
+    id: pair_espnow_remote
+    icon: mdi:remote
+    entity_category: config
+    on_press:
+      - lambda: |-
+          id(remote_pairing) = true;
+          id(remote_pair_deadline) = millis() + 60000;
+          char status[64];
+          snprintf(status, sizeof(status), "Pairing Pilot %d for 60 seconds", id(remote_pairing_slot));
+          id(remote_pairing_status).publish_state(status);
+          ESP_LOGI("espnow_10x10", "Pairing slot %d enabled for 60 seconds", id(remote_pairing_slot));
+      - script.execute: remote_pairing_timeout
+
+  - platform: template
+    name: "Clear Selected ESP-NOW Remote"
+    id: clear_espnow_remote
+    icon: mdi:link-off
+    entity_category: config
+    on_press:
+      - if:
+          condition:
+            lambda: |-
+              const int slot = id(remote_pairing_slot);
+              return (slot == 1 && id(remote_paired_1)) ||
+                     (slot == 2 && id(remote_paired_2)) ||
+                     (slot == 3 && id(remote_paired_3)) ||
+                     (slot == 4 && id(remote_paired_4)) ||
+                     (slot == 5 && id(remote_paired_5)) ||
+                     (slot == 6 && id(remote_paired_6)) ||
+                     (slot == 7 && id(remote_paired_7)) ||
+                     (slot == 8 && id(remote_paired_8)) ||
+                     (slot == 9 && id(remote_paired_9)) ||
+                     (slot == 10 && id(remote_paired_10));
+          then:
+            - espnow.peer.delete:
+                id: espnow_component
+                address: !lambda |-
+                  if (id(remote_pairing_slot) == 1) return id(remote_mac_1);
+                  if (id(remote_pairing_slot) == 2) return id(remote_mac_2);
+                  if (id(remote_pairing_slot) == 3) return id(remote_mac_3);
+                  if (id(remote_pairing_slot) == 4) return id(remote_mac_4);
+                  if (id(remote_pairing_slot) == 5) return id(remote_mac_5);
+                  if (id(remote_pairing_slot) == 6) return id(remote_mac_6);
+                  if (id(remote_pairing_slot) == 7) return id(remote_mac_7);
+                  if (id(remote_pairing_slot) == 8) return id(remote_mac_8);
+                  if (id(remote_pairing_slot) == 9) return id(remote_mac_9);
+                  return id(remote_mac_10);
+      - lambda: |-
+          const int slot = id(remote_pairing_slot);
+          if (slot == 1) {
+            id(remote_mac_1) = std::array<uint8_t, 6>{0, 0, 0, 0, 0, 0};
+            id(remote_paired_1) = false;
+            id(remote_last_seq_1) = 0xFFFFFFFF;
+            id(remote_paired_text_1).publish_state("None");
+          }
+          else if (slot == 2) {
+            id(remote_mac_2) = std::array<uint8_t, 6>{0, 0, 0, 0, 0, 0};
+            id(remote_paired_2) = false;
+            id(remote_last_seq_2) = 0xFFFFFFFF;
+            id(remote_paired_text_2).publish_state("None");
+          }
+          else if (slot == 3) {
+            id(remote_mac_3) = std::array<uint8_t, 6>{0, 0, 0, 0, 0, 0};
+            id(remote_paired_3) = false;
+            id(remote_last_seq_3) = 0xFFFFFFFF;
+            id(remote_paired_text_3).publish_state("None");
+          }
+          else if (slot == 4) {
+            id(remote_mac_4) = std::array<uint8_t, 6>{0, 0, 0, 0, 0, 0};
+            id(remote_paired_4) = false;
+            id(remote_last_seq_4) = 0xFFFFFFFF;
+            id(remote_paired_text_4).publish_state("None");
+          }
+          else if (slot == 5) {
+            id(remote_mac_5) = std::array<uint8_t, 6>{0, 0, 0, 0, 0, 0};
+            id(remote_paired_5) = false;
+            id(remote_last_seq_5) = 0xFFFFFFFF;
+            id(remote_paired_text_5).publish_state("None");
+          }
+          else if (slot == 6) {
+            id(remote_mac_6) = std::array<uint8_t, 6>{0, 0, 0, 0, 0, 0};
+            id(remote_paired_6) = false;
+            id(remote_last_seq_6) = 0xFFFFFFFF;
+            id(remote_paired_text_6).publish_state("None");
+          }
+          else if (slot == 7) {
+            id(remote_mac_7) = std::array<uint8_t, 6>{0, 0, 0, 0, 0, 0};
+            id(remote_paired_7) = false;
+            id(remote_last_seq_7) = 0xFFFFFFFF;
+            id(remote_paired_text_7).publish_state("None");
+          }
+          else if (slot == 8) {
+            id(remote_mac_8) = std::array<uint8_t, 6>{0, 0, 0, 0, 0, 0};
+            id(remote_paired_8) = false;
+            id(remote_last_seq_8) = 0xFFFFFFFF;
+            id(remote_paired_text_8).publish_state("None");
+          }
+          else if (slot == 9) {
+            id(remote_mac_9) = std::array<uint8_t, 6>{0, 0, 0, 0, 0, 0};
+            id(remote_paired_9) = false;
+            id(remote_last_seq_9) = 0xFFFFFFFF;
+            id(remote_paired_text_9).publish_state("None");
+          }
+          else if (slot == 10) {
+            id(remote_mac_10) = std::array<uint8_t, 6>{0, 0, 0, 0, 0, 0};
+            id(remote_paired_10) = false;
+            id(remote_last_seq_10) = 0xFFFFFFFF;
+            id(remote_paired_text_10).publish_state("None");
+          }
+          id(remote_pairing) = false;
+          char status[48];
+          snprintf(status, sizeof(status), "Pilot %d cleared", slot);
+          id(remote_pairing_status).publish_state(status);
+          ESP_LOGI("espnow_10x10", "Cleared ESP-NOW Pilot %d", slot);
+
+light:
+  - platform: status_led
+    name: "Status LED"
+    disabled_by_default: true
+    pin: ${LED_PIN}
+
+event:
+  # Raw per-receiver event. Use the HA event `esp_rc01_button` for automations,
+  # because that one has already been deduplicated across all AR01V3 receivers.
+  - platform: template
+    name: "ESP-NOW Remote Raw"
+    id: espnow_remote_raw_event
+    icon: mdi:remote
+    device_class: button
+    event_types:
+      - "on"
+      - "off"
+      - night
+      - brightness_down
+      - brightness_up
+      - p1
+      - p2
+      - p3
+      - p4
+      - p5
+      - p6
+      - p7
+      - on_hold
+      - off_hold
+      - brightness_up_hold
+      - brightness_down_hold
+      - unknown
+
+text_sensor:
+  - platform: wifi_info
+    ip_address:
+      name: "IP Address"
+      id: ip_address
+      entity_category: diagnostic
+    ssid:
+      name: "Connected SSID"
+      id: ssid
+      entity_category: diagnostic
+    mac_address:
+      name: "Mac Address"
+      id: mac_address
+      entity_category: diagnostic
+
+  - platform: template
+    name: "Last Restart"
+    id: device_last_restart
+    icon: mdi:clock
+    entity_category: diagnostic
+
+  # IR learning status display
+  - platform: template
+    name: "IR Learning Status"
+    id: status_text
+    icon: mdi:information
+    web_server:
+      sorting_group_id: group_ir_signals
+      sorting_weight: 60
+
+  # RF433 learning status display
+  - platform: template
+    name: "RF Learning Status"
+    id: rf_status_text
+    icon: mdi:information
+    web_server:
+      sorting_group_id: group_rf_signals
+      sorting_weight: 60
+
+  # Live slot contents. These use the exact same mdi:remote icon as the paired
+  # ESP-NOW pilots and are refreshed on boot, learning, Flipper import and clear.
+  - platform: template
+    name: "IR Slot 0"
+    id: ir_slot_status_0
+    icon: mdi:remote
+    update_interval: never
+    web_server: {sorting_group_id: group_ir_signals, sorting_weight: 11}
+  - platform: template
+    name: "IR Slot 1"
+    id: ir_slot_status_1
+    icon: mdi:remote
+    update_interval: never
+    web_server: {sorting_group_id: group_ir_signals, sorting_weight: 12}
+  - platform: template
+    name: "IR Slot 2"
+    id: ir_slot_status_2
+    icon: mdi:remote
+    update_interval: never
+    web_server: {sorting_group_id: group_ir_signals, sorting_weight: 13}
+  - platform: template
+    name: "IR Slot 3"
+    id: ir_slot_status_3
+    icon: mdi:remote
+    update_interval: never
+    web_server: {sorting_group_id: group_ir_signals, sorting_weight: 14}
+  - platform: template
+    name: "IR Slot 4"
+    id: ir_slot_status_4
+    icon: mdi:remote
+    update_interval: never
+    web_server: {sorting_group_id: group_ir_signals, sorting_weight: 15}
+  - platform: template
+    name: "IR Slot 5"
+    id: ir_slot_status_5
+    icon: mdi:remote
+    update_interval: never
+    web_server: {sorting_group_id: group_ir_signals, sorting_weight: 16}
+  - platform: template
+    name: "IR Slot 6"
+    id: ir_slot_status_6
+    icon: mdi:remote
+    update_interval: never
+    web_server: {sorting_group_id: group_ir_signals, sorting_weight: 17}
+  - platform: template
+    name: "IR Slot 7"
+    id: ir_slot_status_7
+    icon: mdi:remote
+    update_interval: never
+    web_server: {sorting_group_id: group_ir_signals, sorting_weight: 18}
+  - platform: template
+    name: "IR Slot 8"
+    id: ir_slot_status_8
+    icon: mdi:remote
+    update_interval: never
+    web_server: {sorting_group_id: group_ir_signals, sorting_weight: 19}
+  - platform: template
+    name: "IR Slot 9"
+    id: ir_slot_status_9
+    icon: mdi:remote
+    update_interval: never
+    web_server: {sorting_group_id: group_ir_signals, sorting_weight: 20}
+
+  - platform: template
+    name: "RF Slot 0"
+    id: rf_slot_status_0
+    icon: mdi:remote
+    update_interval: never
+    web_server: {sorting_group_id: group_rf_signals, sorting_weight: 11}
+  - platform: template
+    name: "RF Slot 1"
+    id: rf_slot_status_1
+    icon: mdi:remote
+    update_interval: never
+    web_server: {sorting_group_id: group_rf_signals, sorting_weight: 12}
+  - platform: template
+    name: "RF Slot 2"
+    id: rf_slot_status_2
+    icon: mdi:remote
+    update_interval: never
+    web_server: {sorting_group_id: group_rf_signals, sorting_weight: 13}
+  - platform: template
+    name: "RF Slot 3"
+    id: rf_slot_status_3
+    icon: mdi:remote
+    update_interval: never
+    web_server: {sorting_group_id: group_rf_signals, sorting_weight: 14}
+  - platform: template
+    name: "RF Slot 4"
+    id: rf_slot_status_4
+    icon: mdi:remote
+    update_interval: never
+    web_server: {sorting_group_id: group_rf_signals, sorting_weight: 15}
+  - platform: template
+    name: "RF Slot 5"
+    id: rf_slot_status_5
+    icon: mdi:remote
+    update_interval: never
+    web_server: {sorting_group_id: group_rf_signals, sorting_weight: 16}
+  - platform: template
+    name: "RF Slot 6"
+    id: rf_slot_status_6
+    icon: mdi:remote
+    update_interval: never
+    web_server: {sorting_group_id: group_rf_signals, sorting_weight: 17}
+  - platform: template
+    name: "RF Slot 7"
+    id: rf_slot_status_7
+    icon: mdi:remote
+    update_interval: never
+    web_server: {sorting_group_id: group_rf_signals, sorting_weight: 18}
+  - platform: template
+    name: "RF Slot 8"
+    id: rf_slot_status_8
+    icon: mdi:remote
+    update_interval: never
+    web_server: {sorting_group_id: group_rf_signals, sorting_weight: 19}
+  - platform: template
+    name: "RF Slot 9"
+    id: rf_slot_status_9
+    icon: mdi:remote
+    update_interval: never
+    web_server: {sorting_group_id: group_rf_signals, sorting_weight: 20}
+  - platform: template
+    name: "RF Slot 10"
+    id: rf_slot_status_10
+    icon: mdi:remote
+    update_interval: never
+    web_server: {sorting_group_id: group_rf_signals, sorting_weight: 21}
+  - platform: template
+    name: "RF Slot 11"
+    id: rf_slot_status_11
+    icon: mdi:remote
+    update_interval: never
+    web_server: {sorting_group_id: group_rf_signals, sorting_weight: 22}
+  - platform: template
+    name: "RF Slot 12"
+    id: rf_slot_status_12
+    icon: mdi:remote
+    update_interval: never
+    web_server: {sorting_group_id: group_rf_signals, sorting_weight: 23}
+  - platform: template
+    name: "RF Slot 13"
+    id: rf_slot_status_13
+    icon: mdi:remote
+    update_interval: never
+    web_server: {sorting_group_id: group_rf_signals, sorting_weight: 24}
+  - platform: template
+    name: "RF Slot 14"
+    id: rf_slot_status_14
+    icon: mdi:remote
+    update_interval: never
+    web_server: {sorting_group_id: group_rf_signals, sorting_weight: 25}
+  - platform: template
+    name: "RF Slot 15"
+    id: rf_slot_status_15
+    icon: mdi:remote
+    update_interval: never
+    web_server: {sorting_group_id: group_rf_signals, sorting_weight: 26}
+
+  - platform: template
+    name: "Paired ESP-NOW Pilot 1"
+    id: remote_paired_text_1
+    icon: mdi:remote
+    entity_category: diagnostic
+
+  - platform: template
+    name: "Paired ESP-NOW Pilot 2"
+    id: remote_paired_text_2
+    icon: mdi:remote
+    entity_category: diagnostic
+
+  - platform: template
+    name: "Paired ESP-NOW Pilot 3"
+    id: remote_paired_text_3
+    icon: mdi:remote
+    entity_category: diagnostic
+
+  - platform: template
+    name: "Paired ESP-NOW Pilot 4"
+    id: remote_paired_text_4
+    icon: mdi:remote
+    entity_category: diagnostic
+
+  - platform: template
+    name: "Paired ESP-NOW Pilot 5"
+    id: remote_paired_text_5
+    icon: mdi:remote
+    entity_category: diagnostic
+
+  - platform: template
+    name: "Paired ESP-NOW Pilot 6"
+    id: remote_paired_text_6
+    icon: mdi:remote
+    entity_category: diagnostic
+
+  - platform: template
+    name: "Paired ESP-NOW Pilot 7"
+    id: remote_paired_text_7
+    icon: mdi:remote
+    entity_category: diagnostic
+
+  - platform: template
+    name: "Paired ESP-NOW Pilot 8"
+    id: remote_paired_text_8
+    icon: mdi:remote
+    entity_category: diagnostic
+
+  - platform: template
+    name: "Paired ESP-NOW Pilot 9"
+    id: remote_paired_text_9
+    icon: mdi:remote
+    entity_category: diagnostic
+
+  - platform: template
+    name: "Paired ESP-NOW Pilot 10"
+    id: remote_paired_text_10
+    icon: mdi:remote
+    entity_category: diagnostic
+  - platform: template
+    name: "Last ESP-NOW Remote MAC"
+    id: remote_last_seen
+    icon: mdi:access-point
+    entity_category: diagnostic
+
+  - platform: template
+    name: "ESP-NOW Pairing Status"
+    id: remote_pairing_status
+    icon: mdi:link-variant
+    entity_category: diagnostic
+
+  - platform: template
+    name: "ESP-NOW Last Pilot"
+    id: remote_last_slot_text
+    icon: mdi:remote
+
+  - platform: template
+    name: "ESP-NOW Last Button"
+    id: remote_last_button_text
+    icon: mdi:gesture-tap-button
+
+  - platform: template
+    name: "ESP-NOW Last Packet"
+    id: remote_last_packet_text
+    icon: mdi:identifier
+    entity_category: diagnostic
+
+# Select the logical pilot slot used by Pair/Clear.
+# Keep the mapping identical on every AR01V3: the same physical remote must always use the same slot.
+select:
+  - platform: template
+    name: "ESP-NOW Pairing Slot"
+    id: remote_pairing_slot_select
+    optimistic: true
+    options:
+      - "Pilot 1"
+      - "Pilot 2"
+      - "Pilot 3"
+      - "Pilot 4"
+      - "Pilot 5"
+      - "Pilot 6"
+      - "Pilot 7"
+      - "Pilot 8"
+      - "Pilot 9"
+      - "Pilot 10"
+    initial_option: "Pilot 1"
+    on_value:
+      - lambda: |-
+          if (x == "Pilot 1") id(remote_pairing_slot) = 1;
+          else if (x == "Pilot 2") id(remote_pairing_slot) = 2;
+          else if (x == "Pilot 3") id(remote_pairing_slot) = 3;
+          else if (x == "Pilot 4") id(remote_pairing_slot) = 4;
+          else if (x == "Pilot 5") id(remote_pairing_slot) = 5;
+          else if (x == "Pilot 6") id(remote_pairing_slot) = 6;
+          else if (x == "Pilot 7") id(remote_pairing_slot) = 7;
+          else if (x == "Pilot 8") id(remote_pairing_slot) = 8;
+          else if (x == "Pilot 9") id(remote_pairing_slot) = 9;
+          else if (x == "Pilot 10") id(remote_pairing_slot) = 10;
+          ESP_LOGI("espnow_10x10", "Selected pairing slot %d", id(remote_pairing_slot));
+
+  - platform: template
+    name: "IR Signal Slot"
+    id: signal_slot_select
+    optimistic: true
+    web_server:
+      sorting_group_id: group_ir_signals
+      sorting_weight: 10
+    options:
+      - "Signal 0"
+      - "Signal 1"
+      - "Signal 2"
+      - "Signal 3"
+      - "Signal 4"
+      - "Signal 5"
+      - "Signal 6"
+      - "Signal 7"
+      - "Signal 8"
+      - "Signal 9"
+    initial_option: "Signal 0"
+    on_value:
+      - lambda: |-
+          if (x == "Signal 0") id(signal_select_index) = 0;
+          else if (x == "Signal 1") id(signal_select_index) = 1;
+          else if (x == "Signal 2") id(signal_select_index) = 2;
+          else if (x == "Signal 3") id(signal_select_index) = 3;
+          else if (x == "Signal 4") id(signal_select_index) = 4;
+          else if (x == "Signal 5") id(signal_select_index) = 5;
+          else if (x == "Signal 6") id(signal_select_index) = 6;
+          else if (x == "Signal 7") id(signal_select_index) = 7;
+          else if (x == "Signal 8") id(signal_select_index) = 8;
+          else if (x == "Signal 9") id(signal_select_index) = 9;
+          ESP_LOGI("IR_LEARNING", "Selected slot: %d", id(signal_select_index));
+
+  # RF433 logical slot selector. NVS mapping +10 is internal to flipper_importer.
+  - platform: template
+    name: "RF Signal Slot"
+    id: rf_signal_slot_select
+    optimistic: true
+    web_server:
+      sorting_group_id: group_rf_signals
+      sorting_weight: 10
+    options:
+      - "Signal 0"
+      - "Signal 1"
+      - "Signal 2"
+      - "Signal 3"
+      - "Signal 4"
+      - "Signal 5"
+      - "Signal 6"
+      - "Signal 7"
+      - "Signal 8"
+      - "Signal 9"
+      - "Signal 10"
+      - "Signal 11"
+      - "Signal 12"
+      - "Signal 13"
+      - "Signal 14"
+      - "Signal 15"
+    initial_option: "Signal 0"
+    on_value:
+      - lambda: |-
+          if (x == "Signal 0") id(rf_signal_select_index) = 0;
+          else if (x == "Signal 1") id(rf_signal_select_index) = 1;
+          else if (x == "Signal 2") id(rf_signal_select_index) = 2;
+          else if (x == "Signal 3") id(rf_signal_select_index) = 3;
+          else if (x == "Signal 4") id(rf_signal_select_index) = 4;
+          else if (x == "Signal 5") id(rf_signal_select_index) = 5;
+          else if (x == "Signal 6") id(rf_signal_select_index) = 6;
+          else if (x == "Signal 7") id(rf_signal_select_index) = 7;
+          else if (x == "Signal 8") id(rf_signal_select_index) = 8;
+          else if (x == "Signal 9") id(rf_signal_select_index) = 9;
+          else if (x == "Signal 10") id(rf_signal_select_index) = 10;
+          else if (x == "Signal 11") id(rf_signal_select_index) = 11;
+          else if (x == "Signal 12") id(rf_signal_select_index) = 12;
+          else if (x == "Signal 13") id(rf_signal_select_index) = 13;
+          else if (x == "Signal 14") id(rf_signal_select_index) = 14;
+          else if (x == "Signal 15") id(rf_signal_select_index) = 15;
+          ESP_LOGI("RF_LEARNING", "Selected slot: %d", id(rf_signal_select_index));
+
+number:
+  - platform: template
+    name: "RF Repeat Count"
+    id: rf_repeat_count
+    icon: mdi:repeat
+    entity_category: config
+    web_server:
+      sorting_group_id: group_rf_signals
+      sorting_weight: 70
+    optimistic: true
+    restore_value: false
+    initial_value: 5
+    min_value: 1
+    max_value: 20
+    step: 1
+    mode: box
+
+  - platform: template
+    name: "RF Repeat Gap"
+    id: rf_repeat_gap_ms
+    icon: mdi:timer-outline
+    entity_category: config
+    web_server:
+      sorting_group_id: group_rf_signals
+      sorting_weight: 80
+    unit_of_measurement: ms
+    optimistic: true
+    restore_value: true
+    initial_value: 0
+    min_value: 0
+    max_value: 50
+    step: 1
+    mode: box
+
+# Scripts for sending stored/imported signals
+script:
+  - id: send_raw_signal
+    then:
+      - lambda: |-
+          id(flipper_web_importer).send_ir_slot((uint8_t) id(signal_select_index));
+
+  - id: ir_process_pending
+    mode: restart
+    then:
+      - delay: 150ms
+      - lambda: |-
+          if (!id(is_learning_mode)) return;
+          bool saved = false;
+          if (id(ir_pending_nec_valid)) {
+            saved = id(flipper_web_importer).save_ir_nec(
+                (uint8_t) id(signal_select_index), id(ir_pending_nec_address), id(ir_pending_nec_command));
+            char msg[112];
+            snprintf(msg, sizeof(msg), saved ? "NEC: address 0x%04X, command 0x%04X"
+                                              : "NEC NVS write failed",
+                     id(ir_pending_nec_address), id(ir_pending_nec_command));
+            id(status_text).publish_state(msg);
+          } else if (!id(ir_pending_raw).empty()) {
+            saved = id(flipper_web_importer).save_ir_raw(
+                (uint8_t) id(signal_select_index), id(ir_pending_raw), 38000, 50, 1);
+            id(status_text).publish_state(saved ? "Saved IR RAW fallback" : "IR RAW write failed");
+          }
+          if (saved) id(is_learning_mode) = false;
+          id(ir_pending_raw).clear();
+          id(ir_pending_nec_valid) = false;
+
+  - id: ir_learning_timeout
+    mode: restart
+    then:
+      - delay: 20s
+      - lambda: |-
+          if (id(is_learning_mode)) {
+            id(is_learning_mode) = false;
+            id(ir_pending_raw).clear();
+            id(ir_pending_nec_valid) = false;
+            id(status_text).publish_state("Learning timeout");
+          }
+
+  # Timeout guard for RF learning.
+  - id: rf_learning_timeout
+    mode: restart
+    then:
+      - delay: 20s
+      - lambda: |-
+          if (id(is_rf_learning_mode)) {
+            id(is_rf_learning_mode) = false;
+            id(rf_candidate_count) = 0;
+            id(rf_status_text).publish_state("Learning timeout");
+            ESP_LOGW("RF_LEARNING", "No RC-Switch frame decoded before timeout");
+          }
+
+  - id: send_raw_rf_signal
+    then:
+      - lambda: |-
+          const int repeats = std::clamp((int) id(rf_repeat_count).state, 1, 20);
+          const uint32_t wait_us = (uint32_t) std::clamp(
+              (int) id(rf_repeat_gap_ms).state, 0, 100) * 1000U;
+          id(flipper_web_importer).send_rf_slot(
+              (uint8_t) id(rf_signal_select_index), (uint32_t) repeats, wait_us);
+
+
+  - id: espnow_restore_peers
+    mode: single
+    then:
+      - if:
+          condition:
+            lambda: 'return id(remote_paired_1);'
+          then:
+            - espnow.peer.add:
+                id: espnow_component
+                address: !lambda 'return id(remote_mac_1);'
+      - if:
+          condition:
+            lambda: 'return id(remote_paired_2);'
+          then:
+            - espnow.peer.add:
+                id: espnow_component
+                address: !lambda 'return id(remote_mac_2);'
+      - if:
+          condition:
+            lambda: 'return id(remote_paired_3);'
+          then:
+            - espnow.peer.add:
+                id: espnow_component
+                address: !lambda 'return id(remote_mac_3);'
+      - if:
+          condition:
+            lambda: 'return id(remote_paired_4);'
+          then:
+            - espnow.peer.add:
+                id: espnow_component
+                address: !lambda 'return id(remote_mac_4);'
+      - if:
+          condition:
+            lambda: 'return id(remote_paired_5);'
+          then:
+            - espnow.peer.add:
+                id: espnow_component
+                address: !lambda 'return id(remote_mac_5);'
+      - if:
+          condition:
+            lambda: 'return id(remote_paired_6);'
+          then:
+            - espnow.peer.add:
+                id: espnow_component
+                address: !lambda 'return id(remote_mac_6);'
+      - if:
+          condition:
+            lambda: 'return id(remote_paired_7);'
+          then:
+            - espnow.peer.add:
+                id: espnow_component
+                address: !lambda 'return id(remote_mac_7);'
+      - if:
+          condition:
+            lambda: 'return id(remote_paired_8);'
+          then:
+            - espnow.peer.add:
+                id: espnow_component
+                address: !lambda 'return id(remote_mac_8);'
+      - if:
+          condition:
+            lambda: 'return id(remote_paired_9);'
+          then:
+            - espnow.peer.add:
+                id: espnow_component
+                address: !lambda 'return id(remote_mac_9);'
+      - if:
+          condition:
+            lambda: 'return id(remote_paired_10);'
+          then:
+            - espnow.peer.add:
+                id: espnow_component
+                address: !lambda 'return id(remote_mac_10);'
+      - lambda: |-
+          auto publish_mac = [](bool paired, const std::array<uint8_t, 6> &mac,
+                                esphome::text_sensor::TextSensor *sensor) {
+            if (!paired) {
+              sensor->publish_state("None");
+              return;
+            }
+            char value[18];
+            snprintf(value, sizeof(value), "%02X:%02X:%02X:%02X:%02X:%02X",
+                     mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+            sensor->publish_state(value);
+          };
+          publish_mac(id(remote_paired_1), id(remote_mac_1), id(remote_paired_text_1));
+          publish_mac(id(remote_paired_2), id(remote_mac_2), id(remote_paired_text_2));
+          publish_mac(id(remote_paired_3), id(remote_mac_3), id(remote_paired_text_3));
+          publish_mac(id(remote_paired_4), id(remote_mac_4), id(remote_paired_text_4));
+          publish_mac(id(remote_paired_5), id(remote_mac_5), id(remote_paired_text_5));
+          publish_mac(id(remote_paired_6), id(remote_mac_6), id(remote_paired_text_6));
+          publish_mac(id(remote_paired_7), id(remote_mac_7), id(remote_paired_text_7));
+          publish_mac(id(remote_paired_8), id(remote_mac_8), id(remote_paired_text_8));
+          publish_mac(id(remote_paired_9), id(remote_mac_9), id(remote_paired_text_9));
+          publish_mac(id(remote_paired_10), id(remote_mac_10), id(remote_paired_text_10));
+          id(remote_pairing_status).publish_state("Idle");
+
+  - id: remote_pairing_timeout
+    mode: restart
+    then:
+      - delay: 60s
+      - lambda: |-
+          if (id(remote_pairing) && int32_t(millis() - id(remote_pair_deadline)) >= 0) {
+            id(remote_pairing) = false;
+            id(remote_pairing_status).publish_state("Idle");
+            ESP_LOGI("espnow_10x10", "ESP-NOW pairing window expired");
+          }
+
+  - id: remote_handle_packet
+    mode: queued
+    max_runs: 64
+    parameters:
+      remote_slot: int
+      sequence: string
+      button_code: int
+      battery: int
+    then:
+      - lambda: |-
+          const char *button_name = "unknown";
+          switch (button_code) {
+            case 1: button_name = "on"; break;
+            case 2: button_name = "off"; break;
+            case 3: button_name = "night"; break;
+            case 8: button_name = "brightness_down"; break;
+            case 9: button_name = "brightness_up"; break;
+            case 16: button_name = "p1"; break;
+            case 17: button_name = "p2"; break;
+            case 18: button_name = "p3"; break;
+            case 19: button_name = "p4"; break;
+            case 20: button_name = "p5"; break;
+            case 21: button_name = "p6"; break;
+            case 22: button_name = "p7"; break;
+            case 100: button_name = "on_hold"; break;
+            case 101: button_name = "off_hold"; break;
+            case 102: button_name = "brightness_up_hold"; break;
+            case 103: button_name = "brightness_down_hold"; break;
+          }
+
+          const std::array<uint8_t, 6> *mac = &id(remote_mac_1);
+          if (remote_slot == 2) mac = &id(remote_mac_2);
+          else if (remote_slot == 3) mac = &id(remote_mac_3);
+          else if (remote_slot == 4) mac = &id(remote_mac_4);
+          else if (remote_slot == 5) mac = &id(remote_mac_5);
+          else if (remote_slot == 6) mac = &id(remote_mac_6);
+          else if (remote_slot == 7) mac = &id(remote_mac_7);
+          else if (remote_slot == 8) mac = &id(remote_mac_8);
+          else if (remote_slot == 9) mac = &id(remote_mac_9);
+          else if (remote_slot == 10) mac = &id(remote_mac_10);
+          char mac_text[18];
+          snprintf(mac_text, sizeof(mac_text), "%02X:%02X:%02X:%02X:%02X:%02X",
+                   (*mac)[0], (*mac)[1], (*mac)[2], (*mac)[3], (*mac)[4], (*mac)[5]);
+
+          id(remote_current_button_name) = button_name;
+          id(remote_current_mac) = mac_text;
+          id(remote_button_code_sensor).publish_state(button_code);
+          id(remote_last_button_text).publish_state(button_name);
+          char slot_text[16];
+          snprintf(slot_text, sizeof(slot_text), "Pilot %d", remote_slot);
+          id(remote_last_slot_text).publish_state(slot_text);
+          char packet_text[64];
+          snprintf(packet_text, sizeof(packet_text), "%d:%s:%d", remote_slot,
+                   sequence.c_str(), button_code);
+          id(remote_last_packet_text).publish_state(packet_text);
+          id(espnow_remote_raw_event).trigger(button_name);
+          ESP_LOGI("espnow_10x10", "RX %s slot=%d seq=%s button=%s battery=%d",
+                   mac_text, remote_slot, sequence.c_str(), button_name, battery);
+
+      - homeassistant.event:
+          event: esphome.esp_rc01_raw
+          data:
+            receiver: "${receiver_id}"
+          data_template:
+            remote_slot: "{{ remote_slot }}"
+            sequence: "{{ sequence }}"
+            button_code: "{{ button_code }}"
+            button: "{{ button }}"
+            battery: "{{ battery }}"
+            remote_mac: "{{ remote_mac }}"
+          variables:
+            remote_slot: !lambda 'return remote_slot;'
+            sequence: !lambda 'return sequence;'
+            button_code: !lambda 'return button_code;'
+            button: !lambda 'return id(remote_current_button_name);'
+            battery: !lambda 'return battery;'
+            remote_mac: !lambda 'return id(remote_current_mac);'
+
+time:
+  - platform: sntp
+    id: sntp_time
+  # Define the timezone of the device
+    timezone: "${timezone}"
+  # Change sync interval from default 5min to 6 hours (or as set in substitutions)
+    update_interval: ${sntp_update_interval}
+  # Set specific sntp servers to use
+    servers:
+      - "${sntp_server_1}"
+      - "${sntp_server_2}"
+      - "${sntp_server_3}"
+  # Publish the time the device was last restarted
+    on_time_sync:
+      then:
+        # Update last restart time, but only once.
+        - if:
+            condition:
+              lambda: 'return id(device_last_restart).state == "";'
+            then:
+              - text_sensor.template.publish:
+                  id: device_last_restart
+                  state: !lambda 'return id(sntp_time).now().strftime("%a %d %b %Y - %I:%M:%S %p");'

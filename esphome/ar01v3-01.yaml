@@ -1,0 +1,9 @@
+substitutions:
+  name: "ar01v3-espnow-01"
+  friendly_name: "AR01V3 ESP-NOW 01"
+  receiver_id: "ar01v3_01"
+  room: ""
+  timezone: "UTC"
+
+packages:
+  ar01v3_espnow_10x10: !include ar01v3-espnow-10x10-base.yaml

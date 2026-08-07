@@ -1,0 +1,545 @@
+# AR01V3 ESP-RC01 Gateway
+
+[![CI](https://github.com/supczinskib/athom-ar01v3-esp-rc01-gateway/actions/workflows/ci.yml/badge.svg)](https://github.com/supczinskib/athom-ar01v3-esp-rc01-gateway/actions/workflows/ci.yml)
+
+[Polska wersja README](README_PL.md)
+
+> **Capture with Flipper. Automate with Athom.**
+
+```text
+Remote -> Flipper Zero -> .sub/.ir file -> AR01V3 -> Home Assistant
+```
+
+Community ESPHome firmware and Home Assistant integration for the Athom AR01V3 ESP32 RF/IR remote. Capture and verify compatible signals with Flipper Zero, import them into persistent AR01V3 slots, and replay them from the device page, Home Assistant buttons, virtual devices, scripts, and automations.
+
+Author and maintainer: **Bartosz Supcziński** — <bartek@env.pl>
+
+## Why this project exists
+
+Flipper Zero is an excellent portable capture, analysis, and verification tool, but it does not need to remain connected or permanently assigned to home automation. The AR01V3 is inexpensive, mains powered, network connected, and can stay in the room where a signal must be transmitted.
+
+This project connects those roles. A compatible signal captured in the field can be stored in an AR01V3 and exposed to Home Assistant without writing a new protocol integration for every appliance. Local learning remains available for signals the AR01V3 can decode reliably.
+
+The compatibility claim is intentionally precise: this is not a promise to transmit every signal supported by Flipper Zero. The AR01V3 hardware is limited to 433.92 MHz OOK/ASK RF and its supported IR transmit path.
+
+## Flipper format compatibility
+
+| Flipper format | Import | Replay |
+| --- | :---: | :---: |
+| Princeton 433.92 MHz OOK/ASK | Yes | Yes |
+| Static Dooya 40-bit 433.92 MHz OOK/ASK | Yes | Yes |
+| SubGhz RAW OOK 433.92 MHz | Yes | Yes |
+| IR NEC | Yes | Yes |
+| IR RAW | Yes | Yes |
+| Rolling code | No | No |
+| FSK, other RF frequencies, or unsupported presets | No | No |
+
+## Screenshots
+
+### AR01V3 main page
+
+The ESPHome Web Server v3 interface combines signal control, ESP-RC01 pairing, diagnostics, and the existing AR01V3 functions.
+
+![AR01V3 ESPHome main page](docs/images/ar01v3-main-page.png)
+
+### Integrated Flipper importer
+
+The `/flipper` page imports and tests supported `.sub` and `.ir` files directly against the same persistent slots used by the main page and Home Assistant.
+
+![Integrated Flipper signal import page](docs/images/flipper-import-page.png)
+
+### Home Assistant stored-signal actions
+
+Every stored IR and RF slot is exposed as a normal Home Assistant button under the `AR01V3 Stored Signal Actions` device.
+
+![AR01V3 Stored Signal Actions in Home Assistant](docs/images/home-assistant-stored-actions.png)
+
+## What this project provides
+
+### RF and IR signal storage
+
+- 16 persistent RF slots, numbered `0` through `15`.
+- 10 persistent IR slots, numbered `0` through `9`.
+- One shared storage model: learning, Flipper import, the local web interface, and Home Assistant all use the same NVS records.
+- A hexadecimal preview for every occupied slot and `None` for an empty slot.
+- Individual Home Assistant buttons for all 26 slots under the `AR01V3 Stored Signal Actions` sub-device.
+- RF repeat control from 1 to 20, with a default of 5, plus an optional repeat gap of 0 to 100 ms.
+
+### Reliable RF behavior
+
+- 433.92 MHz OOK/ASK reception on GPIO19 and transmission on GPIO18.
+- RC-Switch learning accepts a signal only after three matching decoded frames.
+- RC-Switch protocol 6 is stored with its true protocol and code, then replayed using the verified compatible waveform. The known 24-bit protocol-6 case is transmitted as Princeton with `TE=403 µs` and `Guard_time=30`.
+- Imported Princeton, static 40-bit Dooya, and SubGhz RAW files can be stored and replayed.
+- Local RF RAW “tape recorder” learning is deliberately disabled. The inexpensive AR01V3 OOK receiver has no RSSI/squelch information and can deliver ambient noise as valid-looking timings. A decoded RC-Switch result is required for local RF learning; use Flipper import for supported RAW or static Dooya signals.
+
+### IR behavior
+
+- IR reception on GPIO33 and transmission on GPIO25.
+- NEC-first learning with RAW fallback.
+- Parsed NEC and raw Flipper `.ir` files can be imported.
+- Learned, imported, stored, and directly supplied Home Assistant signals use the same transmitter path.
+
+### Flipper-compatible import page
+
+- Authenticated page at `http://DEVICE_ADDRESS/flipper`.
+- Styling integrated with the ESPHome Web Server v3 page.
+- RF support: Princeton, static 40-bit Dooya, and SubGhz RAW OOK at 433.92 MHz.
+- IR support: parsed NEC and raw timing files.
+- Live slot state, validation results, import, test transmission, capture status, and slot clearing on the page itself.
+- Neutral regression examples in [examples](examples/).
+
+### ESP-RC01 and multiple receivers
+
+- Ten logical ESP-RC01 pairing slots on every AR01V3 receiver.
+- Persistent remote MAC pairing, 60-second pairing window, clearing, battery value, button name/code, packet sequence, hold events, and receiver identity.
+- Up to ten AR01V3 receivers may cover the same area. They do not retransmit packets; each receiver reports what it heard.
+- The supplied Home Assistant package accepts the first copy and discards duplicates received by other AR01V3 units, then emits one canonical `esp_rc01_button` event.
+
+### Home Assistant control
+
+- 26 entity buttons for stored slots: `Send IR Slot 0..9` and `Send RF Slot 0..15`.
+- Parameterized slot actions with validation and status responses.
+- Direct, slot-free actions for NEC, IR RAW, Princeton, static Dooya, and RF RAW signals.
+- GUI-friendly fire-and-forget action variants whose fields appear in the Home Assistant action editor.
+- No projector, receiver, screen, light, or other household mapping is hard-coded. You assign slots to virtual devices, scripts, scenes, and automations in Home Assistant.
+
+### Existing AR01V3 functionality retained
+
+- ESPHome native API and OTA.
+- Authenticated Web Server v3 home page.
+- Browser-based firmware OTA upload.
+- Bluetooth Proxy with two connection slots.
+- Wi-Fi diagnostics, uptime, restart, safe mode, factory reset, fallback access point, and status LED.
+- Infrared climate proxy entities from the upstream configuration.
+
+## Hardware and pin assignment
+
+This project targets **Athom AR01V3 with ESP32 and 8 MB flash**.
+
+| Function | GPIO | Notes |
+| --- | ---: | --- |
+| RF receiver | 19 | inverted input, 433.92 MHz |
+| RF transmitter | 18 | OOK/ASK output |
+| IR receiver | 33 | inverted input |
+| IR transmitter | 25 | carrier output |
+| Local button | 0 | inverted input |
+| Status LED | 27 | status output |
+
+Do not flash this configuration to a different hardware revision without verifying its schematic and pinout.
+
+## Repository layout
+
+| Path | Purpose |
+| --- | --- |
+| `esphome/ar01v3-01.yaml` … `ar01v3-10.yaml` | Ten unique receiver entry points |
+| `esphome/ar01v3-espnow-10x10-base.yaml` | Shared firmware configuration |
+| `esphome/components/` | Persistent storage and Flipper importer components |
+| `home-assistant/` | ESP-RC01 deduplication package and examples |
+| `examples/` | Neutral Princeton, Dooya, and NEC fixtures |
+| `scripts/` | Installation, configuration, validation, build, upload, and log helpers |
+| `tests/` | Host-side regression and component build tests |
+
+## Requirements
+
+- Athom AR01V3 hardware.
+- A data-capable USB-C cable for the first installation or recovery.
+- A 2.4 GHz Wi-Fi network.
+- Debian or Ubuntu for the supplied installation scripts. Other systems can use a normal ESPHome installation.
+- Python 3.12, 3.13, or 3.14.
+- ESPHome 2026.7.3. The installation helper pins this version because the configuration uses current API action and Web Server features.
+- Home Assistant with the ESPHome integration for Home Assistant control.
+
+For ESP-NOW reliability, configure all access points serving these receivers to use the same fixed 2.4 GHz channel. An ESP32 follows its Wi-Fi channel, so automatic channel changes can prevent receivers on different access points from hearing the same ESP-NOW transmission.
+
+## 1. Download and prepare the project
+
+Clone or download the repository, then enter its root directory:
+
+```bash
+git clone https://github.com/supczinskib/athom-ar01v3-esp-rc01-gateway.git
+cd athom-ar01v3-esp-rc01-gateway
+```
+
+On Debian or Ubuntu, install the pinned ESPHome environment:
+
+```bash
+sudo bash scripts/01_install_esphome.sh
+```
+
+This creates `/opt/esphome-10x10`. If ESPHome is already installed elsewhere, set the `ESPHOME` environment variable to its executable before using the helper scripts.
+
+## 2. Configure secrets
+
+Run:
+
+```bash
+bash scripts/02_configure_secrets.sh
+```
+
+Enter:
+
+- the 2.4 GHz Wi-Fi SSID and password;
+- the local web-interface username;
+- a web password of at least 12 characters.
+
+The script creates `esphome/secrets.yaml`, generates strong OTA and fallback-access-point passwords, preserves existing values on later runs, and sets file mode `0600`. This file is ignored by Git. Never commit or share it.
+
+For a manual setup, copy `esphome/secrets.example.yaml` to `esphome/secrets.yaml` and replace every placeholder.
+
+## 3. Select and customize a receiver configuration
+
+Use one entry-point file per physical AR01V3:
+
+- first unit: `esphome/ar01v3-01.yaml`;
+- second unit: `esphome/ar01v3-02.yaml`;
+- continue through `ar01v3-10.yaml`.
+
+Each file has a unique ESPHome node name and `receiver_id`. Do not flash the same receiver number to two active devices. You may change `friendly_name`, `room`, and `timezone`; keep `name` and `receiver_id` unique. The publication defaults use `UTC` and no area.
+
+## 4. Validate before flashing
+
+Run the complete source, parser, C++, YAML, and ten-configuration validation:
+
+```bash
+bash scripts/03_validate_all.sh
+```
+
+For the faster host-side regression test only:
+
+```bash
+bash scripts/00_self_test.sh
+```
+
+When preparing a clean archive or GitHub release, run the stricter publication check from a tree that does not contain `esphome/secrets.yaml`:
+
+```bash
+bash scripts/00_self_test.sh --publication
+```
+
+Normal deployment validation intentionally permits the local, Git-ignored `secrets.yaml`; publication mode rejects it.
+
+Validation does not prove RF range or compatibility with a particular appliance. Hardware behavior must still be tested on the intended equipment.
+
+## 5. Compile firmware
+
+Compile one receiver, for example receiver 01:
+
+```bash
+bash scripts/04_compile_one.sh 01
+```
+
+The script prints the generated `firmware.factory.bin`, `firmware.bin`, and/or `firmware.ota.bin` paths. Compile all ten configurations only when you actually need all ten images:
+
+```bash
+bash scripts/06_compile_all.sh
+```
+
+## 6. First installation or recovery through USB
+
+Connect the AR01V3 with a data-capable USB-C cable. List detected ports:
+
+```bash
+bash scripts/08_list_serial_ports.sh
+```
+
+Then flash the chosen receiver number using the exact `/dev/serial/by-id/...` path shown by the previous command:
+
+```bash
+sudo bash scripts/09_upload_usb.sh 01 /dev/serial/by-id/REPLACE_WITH_YOUR_PORT
+```
+
+The ESPHome command performs compilation when necessary and uploads the correct serial image. Do not disconnect power while flash is being written. If no port appears, check the cable, USB permissions, and whether another process is using the port.
+
+## 7. Updating over Wi-Fi from the command line
+
+After the first successful USB installation, use native password-protected ESPHome OTA:
+
+```bash
+bash scripts/05_upload_ota.sh 01 ar01v3-espnow-01.local
+```
+
+An IP address may be used instead of the `.local` name. The receiver number must match the firmware already assigned to that physical unit.
+
+## 8. Updating from the device web page
+
+1. Compile the matching receiver configuration with `scripts/04_compile_one.sh`.
+2. Open `http://DEVICE_ADDRESS/`.
+3. Sign in with the web credentials created by `scripts/02_configure_secrets.sh`.
+4. Find **OTA Update**.
+5. Select the matching `firmware.bin` or `firmware.ota.bin` shown by the compile script.
+6. Start the update and wait for the device to reboot.
+
+Never upload `firmware.factory.bin` through OTA; that image is for an initial serial or factory installation. The page can stop responding during the update. Do not remove power. Browser OTA is convenient, but native ESPHome OTA is preferred on a trusted local network.
+
+## 9. Logs and diagnostics
+
+Read network logs for receiver 01:
+
+```bash
+bash scripts/10_logs.sh 01 ar01v3-espnow-01.local
+```
+
+The firmware disables serial logger output (`baud_rate: 0`) to avoid conflicts with the device design. Use API/network logs.
+
+## Device web interface
+
+Open `http://DEVICE_ADDRESS/` and authenticate. The main page provides:
+
+- IR and RF slot selection, learning, sending, and clearing;
+- live learning status;
+- preview rows for every IR and RF slot;
+- RF repeat and repeat-gap controls;
+- ESP-RC01 pairing slot, pair, clear, battery, MAC, and recent packet diagnostics;
+- all stored-slot send buttons;
+- restart, safe mode, factory reset, and diagnostics;
+- a **Flipper Import Page — PRESS** entry that opens `/flipper`.
+
+Clearing a slot deletes its persistent NVS record. Factory reset removes device preferences, pairing data, and stored signal state; treat it as destructive.
+
+## Learning and using IR signals
+
+1. On the main device page, choose `Signal 0` through `Signal 9` under **IR Signal Slot**.
+2. Press **IR Learn**.
+3. Point the original remote toward the AR01V3 and press the required button once.
+4. Wait for **IR Learning Status** to report a saved NEC or RAW signal.
+5. Press **IR Send** to test the selected slot.
+6. The matching `IR Slot N` preview and `Send IR Slot N` Home Assistant button update automatically.
+
+NEC decoding is preferred because it produces a compact, repeatable record. Unsupported protocols fall back to a normalized RAW capture when the receiver obtains a valid frame.
+
+## Learning and using RF signals
+
+1. Choose `Signal 0` through `Signal 15` under **RF Signal Slot**.
+2. Leave **RF Repeat Count** at 5 for the first test. Adjust it only if the target requires a different number.
+3. Press **RF Learn**.
+4. Hold the original RF button until the status reports three matching frames and a saved signal.
+5. Press **RF Send** to test the selected slot.
+
+Local learning supports decodable RC-Switch signals. Different numbers of raw timings between attempts do not by themselves indicate a usable signal. If the status reports no decoded frame, capture the signal with a suitable tool and import a supported Flipper file instead. This is a protocol limitation, not proof that RF transmission is defective.
+
+## Importing Flipper files
+
+1. Open `http://DEVICE_ADDRESS/flipper` or press **Flipper Import Page** on the main page.
+2. In the IR or RF panel, select the destination slot.
+3. Choose a supported `.ir` or `.sub` file.
+4. Import it. Review the live status shown on the same page.
+5. Use the test button before assigning the slot in Home Assistant.
+6. Return to the main page and confirm that the slot preview is no longer `None`.
+
+Importing into an occupied slot replaces its previous record. Keep original signal files as your backup. Dooya support is for static 40-bit codes only; rolling-code motors are not supported. The project does not add FSK support or other RF frequencies.
+
+## Home Assistant integration
+
+### Add each AR01V3
+
+1. In Home Assistant, open **Settings → Devices & services**.
+2. Add the **ESPHome** integration if the device was not discovered automatically.
+3. Enter the AR01V3 IP address or `.local` host name.
+4. Complete the connection and assign an area if desired.
+
+The primary device appears as **Athom RF IR Remote**. Home Assistant may show **AR01V3 Stored Signal Actions** as a second sub-device. This is intentional: the second device contains the 26 GUI buttons designed for virtual devices, scripts, scenes, and automations.
+
+If those buttons do not appear after a firmware update, reload the ESPHome integration or restart Home Assistant. Confirm that the device reports project version `1.0.0`.
+
+### Use a stored slot in the GUI
+
+Use an entity action, not an ESPHome “device action”:
+
+1. In a script or automation, press **Add action**.
+2. Search for **Button: Press**.
+3. Select the entity named `Send RF Slot N` or `Send IR Slot N` under **AR01V3 Stored Signal Actions**.
+4. Save and run the script or automation.
+
+The preview entity `sensor...rf_slot_0` only displays what is stored. It does not transmit. Always use the corresponding `button...send_rf_slot_0` entity to send from the GUI.
+
+### Create a virtual screen/cover in the GUI
+
+Assume RF slot 0 contains **up** and RF slot 1 contains **down**:
+
+1. Open **Settings → Devices & services → Helpers → Create helper**.
+2. Create a **Toggle** named `Screen assumed open`. It stores Home Assistant's assumed position because a one-way RF remote provides no feedback.
+3. Create another helper and choose **Template → Cover**.
+4. Name it `Screen` and choose the `Shutter` device class.
+5. In **State**, enter:
+
+   ```jinja2
+   {{ 'open' if is_state('input_boolean.screen_assumed_open', 'on') else 'closed' }}
+   ```
+
+   Use the actual entity ID created for your toggle.
+
+6. Under **Actions when opening**, add **Button: Press → Send RF Slot 0**, then add **Input boolean: Turn on → Screen assumed open**.
+7. Under **Actions when closing**, add **Button: Press → Send RF Slot 1**, then add **Input boolean: Turn off → Screen assumed open**.
+8. If you have a stored stop signal, assign it under **Actions when stopping**.
+9. Save the helper and add the new `Screen` cover entity to a dashboard.
+
+The displayed position is assumed, not measured. If the physical screen is operated outside Home Assistant, correct the toggle manually or add real position feedback.
+
+### Create virtual appliance buttons in the GUI
+
+For a projector, receiver, light, or other stateless remote command:
+
+1. Open **Settings → Automations & scenes → Scripts → Create script**.
+2. Give the script a clear name, such as `Projector ON`.
+3. Add **Button: Press** and select the appropriate `Send IR Slot N` or `Send RF Slot N` entity.
+4. Save it.
+5. Add the script entity to a dashboard as a button.
+
+Repeat for OFF, input selection, sound mode, screen movement, and other commands. Scripts are reusable actions and are normally the simplest GUI building blocks for a virtual remote.
+
+### Combine signals with a scene
+
+A Home Assistant scene stores desired entity states; it does not run arbitrary transmissions. Use a short script to combine both:
+
+1. In **Settings → Automations & scenes → Scenes**, create the stateful scene, for example dimmed lights.
+2. In **Scripts**, create `Movie mode`.
+3. Add **Scene: Activate** and select the scene.
+4. Add **Button: Press** actions for the required stored IR/RF slots.
+5. Add delays between power-on, input selection, and motor commands when the equipment requires them.
+6. Save the script and add it to a dashboard, automation, or voice assistant.
+
+This keeps the scene responsible for states and the script responsible for the ordered physical commands.
+
+### Send a code directly from Home Assistant without a slot
+
+The following GUI-friendly ESPHome actions are available. Their exact prefix depends on the receiver node name, for example `esphome.ar01v3_espnow_01_transmit_rf_princeton`:
+
+| Action suffix | Required fields |
+| --- | --- |
+| `transmit_ir_nec` | `address`, `command`, `repeats` |
+| `transmit_ir_raw` | signed `timings` text, `carrier_hz`, `duty_percent`, `repeats` |
+| `transmit_rf_princeton` | `code_hex`, `bit_count`, `te_us`, `guard_multiplier`, `repeats`, `gap_ms` |
+| `transmit_rf_dooya` | 40-bit `code_hex`, `repeats` |
+| `transmit_rf_raw` | signed `timings` text, `repeats`, `gap_ms` |
+
+Open **Developer tools → Actions**, search for the full action name, fill in the fields, and test it. After verification, select the same action in a script or automation. Direct actions transmit immediately and do not alter any slot.
+
+Status-returning variants named `send_ir_nec`, `send_ir_raw`, `send_rf_princeton`, `send_rf_dooya`, and `send_rf_raw` are also exposed for advanced callers. Stored slots are available as `send_ir_slot` and `send_rf_slot` actions, but the 26 button entities are easier in the GUI.
+
+## ESP-RC01 pairing and deduplication
+
+### Pair one remote
+
+Pair the same physical ESP-RC01 into the same logical slot on every AR01V3 that should hear it:
+
+1. On receiver 01, choose **ESP-NOW Pairing Slot → Pilot 1**.
+2. Press **Pair ESP-NOW Remote**. The pairing window remains open for 60 seconds.
+3. Press a button on the ESP-RC01 and confirm that **Paired ESP-NOW Pilot 1** shows its MAC address.
+4. Repeat on receiver 02, 03, and so on, always using `Pilot 1` for that same remote.
+5. Use `Pilot 2` for the second physical remote, through `Pilot 10` for the tenth.
+
+The logical slot is part of Home Assistant's deduplication key. Do not place one physical remote in different logical slots on different receivers.
+
+### Install the Home Assistant package
+
+Back up the Home Assistant configuration first. On a Home Assistant host where the configuration directory is available as a normal filesystem, run:
+
+```bash
+sudo bash scripts/07_install_ha_package.sh /var/lib/homeassistant
+```
+
+Replace the path when your configuration directory is elsewhere. The installer backs up `configuration.yaml`, detects common package include styles, installs exactly one compatible package variant, and stops rather than rewriting an unfamiliar package layout.
+
+For Home Assistant OS, copy one of the following manually with Studio Code Server, File editor, Samba, or SSH:
+
+- use `home-assistant/esp_rc01_10x10_package.yaml` with `packages: !include_dir_named packages`;
+- use `home-assistant/esp_rc01_10x10_package_merge_named.yaml` with `packages: !include_dir_merge_named packages`.
+
+Install only one variant, check the Home Assistant configuration, and restart Home Assistant. The package automation may be visible as read-only in the UI because it is defined in a package rather than `automations.yaml`; that is expected. Create your own user automations in the GUI and trigger them from the canonical event.
+
+### Create a remote-button automation in the GUI
+
+1. Open **Settings → Automations & scenes → Create automation**.
+2. Add trigger **Event**.
+3. Set event type to `esp_rc01_button`.
+4. In event data, use a logical remote and button, for example:
+
+   ```yaml
+   remote_slot: 1
+   button: "on"
+   ```
+
+5. Add any GUI action: activate a scene, run a script, press a stored-slot button, or control a normal Home Assistant entity.
+6. Save and test it.
+
+The canonical event also includes `sequence`, `button_code`, `battery`, `remote_mac`, and `receiver`. See `home-assistant/automation_examples.yaml` for optional examples.
+
+## Signal record behavior
+
+- IR slots use logical NVS keys `irsig_0` through `irsig_9`.
+- RF logical slots are mapped by the storage component to the RF key range beginning after the IR slots. The web importer, learner, sender, previews, and Home Assistant buttons all call the same storage component, preventing split slot state.
+- Records store signed 32-bit timings and protocol metadata as required. A preview shows up to the first eight bytes in hexadecimal and appends `...` when more data exists.
+- Existing records survive normal reboot and firmware update. Clearing a slot or factory reset removes them.
+
+## Known limitations
+
+- RF is fixed to the AR01V3's 433.92 MHz OOK/ASK hardware.
+- Local RF learning requires a supported RC-Switch decode; local arbitrary RAW learning is not offered.
+- Imported RAW transmission cannot guarantee compatibility with every receiver or modulation.
+- Static Dooya 40-bit import/transmission is supported; rolling-code systems are not.
+- FSK and other radio frequencies are not supported.
+- One-way RF/IR commands do not provide real device state. Home Assistant virtual entities show assumed state unless separate feedback exists.
+- RF regulatory requirements differ by country. The operator is responsible for legal frequency, power, duty cycle, and device use.
+- The web interface uses HTTP, not HTTPS. Keep it on a trusted network.
+
+## Troubleshooting
+
+### The web page is incomplete or the device stops responding
+
+- Confirm a stable power supply and strong Wi-Fi signal.
+- Keep 2.4 GHz AP channels fixed and consistent when using ESP-NOW across several APs.
+- Use the pinned ESPHome version and run the full validation before flashing.
+- Read network logs with `scripts/10_logs.sh`.
+- Temporarily reduce BLE load by ensuring Home Assistant is connected and the proxy is not scanning unnecessarily.
+
+### RF learning times out
+
+- Hold the original button long enough to deliver at least three identical decoded frames.
+- Move the remote closer, but avoid touching the AR01V3 antenna area.
+- Confirm that logs show a stable RC-Switch protocol and code.
+- If the remote is Dooya, rolling code, FSK, or an unsupported protocol, use a supported static import or another gateway designed for that modulation.
+
+### A learned RF code is received correctly but the appliance does not react
+
+- Test repeat count 5 first; some receivers ignore a single frame.
+- Verify protocol, inversion, bit count, TE, and guard. Protocol 6 is not equivalent to transmitting the same bits with generic protocol 1.
+- Compare with a known-working imported file. Reception proves the receiver can decode the remote; it does not prove a differently generated transmit waveform is compatible.
+
+### Imported IR is slow or unreliable
+
+- Prefer parsed NEC when the original protocol is NEC.
+- Keep RAW captures to one clean command and use the correct carrier and duty cycle.
+- Avoid excessive repeats and unnecessary gaps.
+- Position the AR01V3 IR emitters with a clear line of sight to the appliance.
+
+### Home Assistant action search is empty
+
+- Confirm the ESPHome integration is connected and the receiver runs version `1.0.0`.
+- Reload the ESPHome integration or restart Home Assistant after a firmware upgrade that adds actions.
+- For stored signals, search for **Button: Press** and select a `Send IR Slot N` or `Send RF Slot N` entity. Do not search for the preview sensor.
+- Direct actions begin with `esphome.<node_name>_transmit_...`.
+
+## Updating the embedded `/flipper` page during development
+
+Edit `esphome/components/flipper_importer/flipper_page.html`, then regenerate the compressed header:
+
+```bash
+python3 scripts/generate_flipper_page.py
+```
+
+Run `scripts/00_self_test.sh` afterward. Do not edit `flipper_page.h` by hand.
+
+## Credits, license, and support
+
+- Author: [Bartosz Supcziński](AUTHORS.md), <bartek@env.pl>.
+- ESPHome project identifier: `envpl.ar01v3_esp_rc01_gateway`.
+- Project-specific code: GNU GPL version 3 only; see [LICENSE](LICENSE).
+- Third-party provenance: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+- Security reports: [SECURITY.md](SECURITY.md).
+- Contribution rules: [CONTRIBUTING.md](CONTRIBUTING.md).
+- Prepared GitHub repository metadata and release text: [GITHUB_PUBLISHING.md](GITHUB_PUBLISHING.md) and [.github/releases/v1.0.0.md](.github/releases/v1.0.0.md).
+
+Parts of the hardware configuration and storage component originate from Athom's public ESPHome configuration repository. Athom retains all rights to its original work. Project-specific additions are provided under `GPL-3.0-only`; the detailed attribution and licensing status of upstream material are recorded separately in `THIRD_PARTY_NOTICES.md`.
+
+This is an independent community project and is not an official Athom, ESPHome, Home Assistant, or Flipper Devices product.

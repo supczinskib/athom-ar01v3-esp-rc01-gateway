@@ -1,0 +1,24 @@
+# ESPHome build output and local secrets
+esphome/.esphome/
+esphome/secrets.yaml
+*.bin
+*.elf
+*.map
+
+# Python and test artifacts
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Editor and operating-system metadata
+.DS_Store
+._*
+Thumbs.db
+*.swp
+*.swo
+
+# Local logs and backups
+*.log
+*.backup-*
+*.bak
+

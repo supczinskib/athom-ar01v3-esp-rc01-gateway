@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="icon" href="data:">
+<title>AR01V3 · Flipper Signal Import</title>
+<style>
+:root{color-scheme:light dark;--bg:#fafafa;--panel:#fff;--row:#fff;--text:#212121;--muted:#6f6f6f;--line:#ddd;--line2:#eee;--accent:#039be5;--accent2:#0288d1;--ok:#43a047;--bad:#e53935;--shadow:0 1px 2px #00000024}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px Arial,Helvetica,sans-serif;min-height:100vh}button,select,input{font:inherit;color:inherit}.shell{max-width:1180px;margin:auto;padding:22px 16px 42px}.head{height:74px;display:flex;align-items:center;justify-content:center;position:relative;text-align:center}.head h1{font-size:22px;margin:0;font-weight:700}.head p{font-size:11px;margin:5px 0 0;color:var(--muted)}.home{position:absolute;left:0;top:18px;width:38px;height:34px;border:1px solid var(--line);border-radius:4px;display:grid;place-items:center;color:var(--muted);background:var(--panel);box-shadow:var(--shadow)}.home:hover{color:var(--accent);border-color:var(--accent)}svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}.connection{position:absolute;right:4px;top:26px;display:flex;align-items:center;gap:8px;color:var(--muted);font-size:12px}.dot{width:10px;height:10px;border-radius:50%;background:#999;box-shadow:0 0 0 3px #9992}.dot.ok{background:var(--ok);box-shadow:0 0 0 3px #43a0472b}.dot.bad{background:var(--bad);box-shadow:0 0 0 3px #e539352b}.statusbox{border:1px solid var(--line);border-radius:6px;background:var(--panel);box-shadow:var(--shadow);padding:15px 17px;margin:8px 0 44px;display:grid;grid-template-columns:24px 1fr auto;gap:12px;align-items:center}.statusbox .pulse{color:var(--accent)}.status-title{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px}.status-message{font-size:14px;overflow-wrap:anywhere}.capture{font-size:11px;color:var(--muted);white-space:nowrap}.capture a{color:var(--accent);text-decoration:none}.grid{display:grid;grid-template-columns:1fr 1fr;gap:22px}.group{position:relative;border:1px solid var(--line);border-radius:6px;background:var(--panel);box-shadow:var(--shadow);padding-top:17px;min-width:0}.tab{position:absolute;left:-1px;top:-29px;height:30px;padding:8px 16px 7px;background:var(--panel);border:1px solid var(--line);border-bottom-color:var(--panel);border-radius:6px 6px 0 0;font-size:13px;font-weight:600}.entity{display:grid;grid-template-columns:34px minmax(110px,1fr) minmax(180px,1.5fr);gap:10px;align-items:center;padding:13px 15px;border-top:1px solid var(--line2)}.entity:first-of-type{border-top:0}.ico{color:var(--muted);display:grid;place-items:center}.label strong{display:block;font-size:13px}.label span{display:block;color:var(--muted);font-size:11px;line-height:1.35;margin-top:3px}.control{min-width:0}.pair{display:grid;grid-template-columns:1fr 1fr;gap:8px}.field{display:grid;gap:5px}.field label{font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}select,input[type=number],input[type=file]{width:100%;height:34px;border:1px solid var(--line);border-radius:3px;background:var(--row);padding:5px 8px;outline:none}select:focus,input:focus{border-color:var(--accent)}input[type=file]{height:auto;min-height:36px;padding:4px;font-size:12px}input[type=file]::file-selector-button{border:0;border-right:1px solid var(--line);background:transparent;color:var(--accent);font-weight:600;padding:6px 10px 6px 5px;margin-right:9px;cursor:pointer}.actions{display:flex;justify-content:flex-end;flex-wrap:wrap;gap:6px;margin-top:9px}.btn{border:0;background:transparent;color:var(--accent);font-size:11px;font-weight:700;letter-spacing:.04em;padding:7px 9px;border-radius:3px;cursor:pointer}.btn:hover{background:#039be51a}.btn.primary{background:var(--accent);color:#fff}.btn.primary:hover{background:var(--accent2)}.btn:disabled{opacity:.45;cursor:wait}.help{margin-top:24px;border-left:3px solid var(--accent);padding:5px 0 5px 13px;color:var(--muted);font-size:12px;line-height:1.55}.help strong{color:var(--text)}footer{margin-top:20px;color:var(--muted);font-size:11px;display:flex;justify-content:space-between;gap:12px}footer a{color:var(--accent);text-decoration:none}@media(max-width:790px){.grid{grid-template-columns:1fr;gap:50px}.entity{grid-template-columns:28px 1fr}.control{grid-column:2}.connection span{display:none}.capture{white-space:normal;text-align:right}}@media(max-width:480px){.shell{padding-inline:10px}.head h1{font-size:18px}.entity{padding-inline:11px}.statusbox{grid-template-columns:20px 1fr}.capture{grid-column:2;text-align:left}.pair{grid-template-columns:1fr}}
+.filepick{height:36px;border:1px solid var(--line);border-radius:3px;background:var(--row);display:flex;align-items:center;min-width:0;cursor:pointer}.filepick input{position:absolute;opacity:0;width:1px;height:1px}.filepick b{height:100%;display:flex;align-items:center;padding:0 10px;color:var(--accent);font-size:11px;border-right:1px solid var(--line);white-space:nowrap}.filepick em{padding:0 9px;font-style:normal;font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+@media(prefers-color-scheme:dark){:root{--bg:#101010;--panel:#151515;--row:#171717;--text:#e7e7e7;--muted:#9b9b9b;--line:#383838;--line2:#292929;--shadow:0 1px 2px #0008}}
+</style>
+</head>
+<body>
+<main class="shell">
+  <header class="head">
+    <a class="home" href="/" aria-label="Back to ESPHome"><svg viewBox="0 0 24 24"><path d="M3 11.5 12 4l9 7.5M5.5 10v10h13V10M9.5 20v-6h5v6"/></svg></a>
+    <div><h1>Flipper Signal Import</h1><p>AR01V3 · shared IR and RF slots</p></div>
+    <div class="connection"><span id="onlineText">Connecting</span><i class="dot" id="onlineDot"></i></div>
+  </header>
+
+  <section class="statusbox" aria-live="polite">
+    <div class="pulse"><svg viewBox="0 0 24 24"><path d="M3 12h4l2.2-6 4.1 12 2.2-6H21"/></svg></div>
+    <div><div class="status-title">Live device status</div><div class="status-message" id="status">Connecting to AR01V3…</div></div>
+    <div class="capture" id="capture">No RF capture yet</div>
+  </section>
+
+  <div class="grid">
+    <section class="group">
+      <div class="tab">IR Signals</div>
+      <form class="import" data-kind="ir">
+        <div class="entity">
+          <div class="ico"><svg viewBox="0 0 24 24"><rect x="7" y="3" width="10" height="18" rx="2"/><circle cx="12" cy="7" r="1"/><path d="M10 17h4M3.5 8.5a5 5 0 0 0 0 7M20.5 8.5a5 5 0 0 1 0 7"/></svg></div>
+          <div class="label"><strong>Import Flipper IR</strong><span>Parsed NEC and RAW .ir files</span></div>
+          <div class="control"><div class="field"><label>Target slot</label><select name="slot" data-max="9"></select></div><div class="field" style="margin-top:8px"><label>Flipper file</label><label class="filepick"><input name="file" type="file" accept=".ir" required><b>CHOOSE FILE</b><em>No file selected</em></label></div><div class="actions"><button class="btn" type="submit" data-test="0">IMPORT</button><button class="btn primary" type="submit" data-test="1">IMPORT &amp; TEST</button></div></div>
+        </div>
+      </form>
+      <form class="test" data-kind="ir">
+        <div class="entity">
+          <div class="ico"><svg viewBox="0 0 24 24"><path d="m9 7 8 5-8 5V7Z"/><circle cx="12" cy="12" r="10"/></svg></div>
+          <div class="label"><strong>Test stored IR</strong><span>Transmit the selected main-page slot</span></div>
+          <div class="control"><div class="field"><label>Slot</label><select name="slot" data-max="9"></select></div><div class="actions"><button class="btn" type="submit">TEST IR</button></div></div>
+        </div>
+      </form>
+    </section>
+
+    <section class="group">
+      <div class="tab">RF 433.92 MHz Signals</div>
+      <form class="import" data-kind="rf">
+        <div class="entity">
+          <div class="ico"><svg viewBox="0 0 24 24"><path d="M12 19V9M9 22h6M8 12a5.5 5.5 0 0 1 0-6M16 12a5.5 5.5 0 0 0 0-6M5 16a10 10 0 0 1 0-14M19 16a10 10 0 0 0 0-14"/><circle cx="12" cy="6" r="2"/></svg></div>
+          <div class="label"><strong>Import Flipper RF</strong><span>Princeton, Dooya and RAW OOK .sub files</span></div>
+          <div class="control"><div class="field"><label>Target slot</label><select name="slot" data-max="15"></select></div><div class="field" style="margin-top:8px"><label>Flipper file</label><label class="filepick"><input name="file" type="file" accept=".sub" required><b>CHOOSE FILE</b><em>No file selected</em></label></div><div class="actions"><button class="btn" type="submit" data-test="0">IMPORT</button><button class="btn primary" type="submit" data-test="1">IMPORT &amp; TEST</button></div></div>
+        </div>
+      </form>
+      <form class="test" data-kind="rf">
+        <div class="entity">
+          <div class="ico"><svg viewBox="0 0 24 24"><path d="m9 7 8 5-8 5V7Z"/><circle cx="12" cy="12" r="10"/></svg></div>
+          <div class="label"><strong>Test stored RF</strong><span>Use 5–10 repeats for reliable reception</span></div>
+          <div class="control"><div class="pair"><div class="field"><label>Slot</label><select name="slot" data-max="15"></select></div><div class="field"><label>Repeats</label><input name="repeats" type="number" min="1" max="20" value="5"></div></div><input name="gap" type="hidden" value="0"><div class="actions"><button class="btn" type="submit">TEST RF</button></div></div>
+        </div>
+      </form>
+    </section>
+  </div>
+
+  <div class="help"><strong>These are the same slots shown on the ESPHome main page.</strong> Import replaces the selected slot. “Import &amp; Test” saves first and then transmits. RF defaults to 5 repeats; the allowed range remains 1–20.</div>
+  <footer><span>ESPHome v3–matched light and dark theme</span><a href="/">Back to the ESPHome main page</a></footer>
+</main>
+<script>
+const statusEl=document.querySelector('#status'),dot=document.querySelector('#onlineDot'),onlineText=document.querySelector('#onlineText'),capture=document.querySelector('#capture');
+document.querySelectorAll('select[data-max]').forEach(s=>{for(let i=0;i<=Number(s.dataset.max);i++)s.add(new Option(`Signal ${i}`,i))});
+document.querySelectorAll('.filepick input').forEach(i=>i.addEventListener('change',()=>i.parentElement.querySelector('em').textContent=i.files[0]?.name||'No file selected'));
+const show=(message,ok=true)=>{statusEl.textContent=message;dot.className=`dot ${ok?'ok':'bad'}`;onlineText.textContent=ok?'Online':'Error'};
+async function poll(){try{const r=await fetch('/flipper/status',{cache:'no-store'});if(!r.ok)throw Error('Status unavailable');const j=await r.json();show(j.message,true);capture.innerHTML=j.rf_capture_count?`Last RF capture: ${j.rf_capture_count}→${j.rf_clean_count} · <a href="/flipper/capture">DOWNLOAD LAST RF CAPTURE</a>`:'No RF capture yet'}catch(e){show(e.message,false)}}
+async function request(url,options,buttons){buttons.forEach(b=>b.disabled=true);show('Working…',true);try{const r=await fetch(url,options),j=await r.json();if(!r.ok)throw Error(j.message||`HTTP ${r.status}`);show(j.details?`${j.message} · ${j.details}`:j.message,true);setTimeout(poll,400)}catch(e){show(e.message,false)}finally{buttons.forEach(b=>b.disabled=false)}}
+document.querySelectorAll('form.import').forEach(form=>form.addEventListener('submit',e=>{e.preventDefault();const b=e.submitter,kind=form.dataset.kind,slot=form.elements.slot.value,test=b.dataset.test,buttons=[...form.querySelectorAll('button')];request(`/flipper/import?kind=${kind}&slot=${slot}&test=${test}`,{method:'POST',body:new FormData(form)},buttons)}));
+document.querySelectorAll('form.test').forEach(form=>form.addEventListener('submit',e=>{e.preventDefault();const p=new URLSearchParams(new FormData(form));p.set('kind',form.dataset.kind);request(`/flipper/test?${p}`,{},[...form.querySelectorAll('button')])}));
+poll();setInterval(poll,1000);
+</script>
+</body>
+</html>

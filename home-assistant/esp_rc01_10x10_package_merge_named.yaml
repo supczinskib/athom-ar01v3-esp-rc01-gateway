@@ -1,0 +1,138 @@
+esp_rc01_10x10:
+  # Home Assistant package for 10 ESP-RC01 pilots and 10 AR01V3 receivers.
+  # Receives raw events from every AR01V3 and emits exactly one canonical event:
+  #   esp_rc01_button
+
+  input_text:
+    esp_rc01_pilot_1_recent_packets:
+      name: ESP-RC01 Pilot 1 recent packets
+      max: 255
+      icon: mdi:identifier
+    esp_rc01_pilot_2_recent_packets:
+      name: ESP-RC01 Pilot 2 recent packets
+      max: 255
+      icon: mdi:identifier
+    esp_rc01_pilot_3_recent_packets:
+      name: ESP-RC01 Pilot 3 recent packets
+      max: 255
+      icon: mdi:identifier
+    esp_rc01_pilot_4_recent_packets:
+      name: ESP-RC01 Pilot 4 recent packets
+      max: 255
+      icon: mdi:identifier
+    esp_rc01_pilot_5_recent_packets:
+      name: ESP-RC01 Pilot 5 recent packets
+      max: 255
+      icon: mdi:identifier
+    esp_rc01_pilot_6_recent_packets:
+      name: ESP-RC01 Pilot 6 recent packets
+      max: 255
+      icon: mdi:identifier
+    esp_rc01_pilot_7_recent_packets:
+      name: ESP-RC01 Pilot 7 recent packets
+      max: 255
+      icon: mdi:identifier
+    esp_rc01_pilot_8_recent_packets:
+      name: ESP-RC01 Pilot 8 recent packets
+      max: 255
+      icon: mdi:identifier
+    esp_rc01_pilot_9_recent_packets:
+      name: ESP-RC01 Pilot 9 recent packets
+      max: 255
+      icon: mdi:identifier
+    esp_rc01_pilot_10_recent_packets:
+      name: ESP-RC01 Pilot 10 recent packets
+      max: 255
+      icon: mdi:identifier
+
+  timer:
+    esp_rc01_pilot_1_dedupe:
+      name: ESP-RC01 Pilot 1 dedupe
+      duration: "00:00:02"
+    esp_rc01_pilot_2_dedupe:
+      name: ESP-RC01 Pilot 2 dedupe
+      duration: "00:00:02"
+    esp_rc01_pilot_3_dedupe:
+      name: ESP-RC01 Pilot 3 dedupe
+      duration: "00:00:02"
+    esp_rc01_pilot_4_dedupe:
+      name: ESP-RC01 Pilot 4 dedupe
+      duration: "00:00:02"
+    esp_rc01_pilot_5_dedupe:
+      name: ESP-RC01 Pilot 5 dedupe
+      duration: "00:00:02"
+    esp_rc01_pilot_6_dedupe:
+      name: ESP-RC01 Pilot 6 dedupe
+      duration: "00:00:02"
+    esp_rc01_pilot_7_dedupe:
+      name: ESP-RC01 Pilot 7 dedupe
+      duration: "00:00:02"
+    esp_rc01_pilot_8_dedupe:
+      name: ESP-RC01 Pilot 8 dedupe
+      duration: "00:00:02"
+    esp_rc01_pilot_9_dedupe:
+      name: ESP-RC01 Pilot 9 dedupe
+      duration: "00:00:02"
+    esp_rc01_pilot_10_dedupe:
+      name: ESP-RC01 Pilot 10 dedupe
+      duration: "00:00:02"
+
+  automation:
+    - id: esp_rc01_10x10_deduplicate
+      alias: "ESP-RC01 10x10: deduplicate AR01V3 receivers"
+      description: "Accept the first copy of a packet and discard copies from the other receivers."
+      mode: queued
+      max: 500
+      trace:
+        stored_traces: 50
+      triggers:
+        - trigger: event
+          event_type: esphome.esp_rc01_raw
+      variables:
+        remote_slot: "{{ trigger.event.data.remote_slot | int(0) }}"
+        sequence: "{{ trigger.event.data.sequence | int(-1) }}"
+        button_code: "{{ trigger.event.data.button_code | int(-1) }}"
+        button: "{{ trigger.event.data.button | string }}"
+        battery: "{{ trigger.event.data.battery | int(-1) }}"
+        remote_mac: "{{ trigger.event.data.remote_mac | string }}"
+        receiver: "{{ trigger.event.data.receiver | string }}"
+        # Each helper belongs to one logical pilot slot, whose paired MAC is fixed.
+        # A compact sequence+button key lets us retain 15 recent packets within input_text's 255-char limit.
+        fingerprint: "{{ sequence ~ ':' ~ button_code }}"
+        recent_entity: "{{ 'input_text.esp_rc01_pilot_' ~ remote_slot ~ '_recent_packets' }}"
+        timer_entity: "{{ 'timer.esp_rc01_pilot_' ~ remote_slot ~ '_dedupe' }}"
+        recent_value: >-
+          {{ states(recent_entity) if is_state(timer_entity, 'active') else '' }}
+        recent_items: >-
+          {{ recent_value.split('|') if recent_value | length > 0 else [] }}
+        new_recent_value: >-
+          {{ (recent_items + [fingerprint])[-15:] | join('|') }}
+      conditions:
+        - condition: template
+          value_template: >-
+            {{ remote_slot in range(1, 11)
+                and sequence >= 0
+                and button_code >= 0
+                and receiver in ['ar01v3_01', 'ar01v3_02', 'ar01v3_03', 'ar01v3_04', 'ar01v3_05', 'ar01v3_06', 'ar01v3_07', 'ar01v3_08', 'ar01v3_09', 'ar01v3_10'] }}
+        - condition: template
+          value_template: "{{ fingerprint not in recent_items }}"
+      actions:
+        - action: input_text.set_value
+          target:
+            entity_id: "{{ recent_entity }}"
+          data:
+            value: "{{ new_recent_value }}"
+        - action: timer.start
+          target:
+            entity_id: "{{ timer_entity }}"
+          data:
+            duration: "00:00:02"
+        - event: esp_rc01_button
+          event_data:
+            remote_slot: "{{ remote_slot }}"
+            sequence: "{{ sequence }}"
+            button_code: "{{ button_code }}"
+            button: "{{ button }}"
+            battery: "{{ battery }}"
+            remote_mac: "{{ remote_mac }}"
+            receiver: "{{ receiver }}"
