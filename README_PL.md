@@ -4,7 +4,7 @@
 
 [English README](README.md)
 
-> **Capture with Flipper. Automate with Athom.**
+> **Przechwytuj Flipperem. Automatyzuj z Athom.**
 
 ```text
 Pilot -> Flipper Zero -> plik .sub/.ir -> AR01V3 -> Home Assistant
