@@ -7,7 +7,7 @@
 > **Przechwytuj Flipperem. Automatyzuj z Athom.**
 
 ```text
-Pilot RF/IR -> Flipper Zero -> plik .sub/.ir -> bramka AR01V3 (+ opcjonalne piloty ESP-RC01 przez ESP-NOW) -> Home Assistant
+Pilot RF/IR -> Flipper Zero -> plik .sub/.ir -> bramka AR01V3 (+ opcjonalne piloty ESP-RC01) -> Home Assistant
 ```
 
 Społecznościowy firmware ESPHome i integracja z Home Assistant dla opartej na ESP32 bramki RF/IR Athom AR01V3, współpracującej z pilotami ESP-RC01 oraz sygnałami przechwyconymi przez Flipper Zero. Flipper Zero rejestruje i weryfikuje kompatybilne sygnały RF/IR, AR01V3 przechowuje je w trwałych slotach i nadaje, a Home Assistant pozwala wywoływać je za pomocą przycisków, wirtualnych urządzeń, skryptów i automatyzacji.
