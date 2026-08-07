@@ -4,21 +4,33 @@
 
 [Polska wersja README](README_PL.md)
 
-> **Capture with Flipper. Automate with Athom.**
+> **Local RF, IR, and ESP-RC01 control for Home Assistant.**
 
 ```text
-Remote -> Flipper Zero -> .sub/.ir file -> AR01V3 -> Home Assistant
+RF/IR remote -> Flipper Zero -> .sub/.ir file -> AR01V3 gateway (+ optional ESP-RC01 remotes) -> Home Assistant
 ```
 
-Community ESPHome firmware and Home Assistant integration for the Athom AR01V3 ESP32 RF/IR remote. Capture and verify compatible signals with Flipper Zero, import them into persistent AR01V3 slots, and replay them from the device page, Home Assistant buttons, virtual devices, scripts, and automations.
+Community ESPHome firmware that turns the ESP32-based Athom AR01V3 into a local RF, IR, and ESP-NOW gateway for Home Assistant. It provides 16 persistent RF slots and 10 persistent IR slots, remote signal provisioning over the network, standard Home Assistant button entities, parameterized and GUI-friendly transmission actions, and support for up to 10 ESP-RC01 remotes across up to 10 AR01V3 receivers with Home Assistant deduplication. The stored commands can be assigned to virtual devices, scripts, scenes, and automations without hard-coded appliance mappings.
 
 Author and maintainer: **Bartosz Supcziński** — <bartek@env.pl>
 
 ## Why this project exists
 
-Flipper Zero is an excellent portable capture, analysis, and verification tool, but it does not need to remain connected or permanently assigned to home automation. The AR01V3 is inexpensive, mains powered, network connected, and can stay in the room where a signal must be transmitted.
+The AR01V3 is inexpensive, mains powered, network connected, and well suited to remaining in the room where RF or IR commands must be transmitted. This project makes its stored signals reusable Home Assistant resources instead of controls tied only to a device page. Every slot has its own entity button, while parameterized actions allow both stored and directly supplied signals to be used from the Home Assistant GUI.
 
-This project connects those roles. A compatible signal captured in the field can be stored in an AR01V3 and exposed to Home Assistant without writing a new protocol integration for every appliance. Local learning remains available for signals the AR01V3 can decode reliably.
+Once a compatible signal file or definition is available, an installed gateway can be provisioned and tested over the network. There is no need to connect it by USB, rebuild the firmware, stand next to the AR01V3, or bring the original remote to its location. This is particularly useful for gateways mounted in remote, difficult-to-reach, or multiple locations.
+
+ESP-RC01 support adds a second role: inexpensive physical remotes can trigger Home Assistant actions through ESP-NOW. Several AR01V3 receivers can hear the same remote for wider coverage, while the supplied Home Assistant package removes duplicate receptions and emits one canonical event.
+
+Signals can enter the system in three ways: local learning, import of a supported file, or a direct Home Assistant action that does not use a slot. These are complementary input methods, not the main purpose of the project.
+
+## Adding signals and optional Flipper support
+
+Flipper Zero is not required. The AR01V3 can learn supported IR signals and decodable RC-Switch RF signals directly. Flipper-compatible import is an optional fallback when the AR01V3 cannot learn a signal reliably or when a compatible `.sub` or `.ir` file is already available. A file can be imported without owning the device that originally captured it.
+
+The AR01V3 uses inexpensive fixed-frequency 433.92 MHz OOK/ASK hardware. It is a useful automation gateway, but it is not a full RF analyser and cannot be expected to decode every proprietary protocol reliably. A Flipper Zero or another suitable analyser can provide a verified reference capture for signals outside reliable local learning.
+
+Not every RF capture is universal. Files may contain a transmitter identifier, channel, address, or pairing information, so a capture from another installation is not guaranteed to work unchanged with every motor or receiver. Even when direct reuse is not possible, a verified capture can provide reference data for improving native protocol support.
 
 The compatibility claim is intentionally precise: this is not a promise to transmit every signal supported by Flipper Zero. The AR01V3 hardware is limited to 433.92 MHz OOK/ASK RF and its supported IR transmit path.
 
@@ -88,6 +100,16 @@ Every stored IR and RF slot is exposed as a normal Home Assistant button under t
 - IR support: parsed NEC and raw timing files.
 - Live slot state, validation results, import, test transmission, capture status, and slot clearing on the page itself.
 - Neutral regression examples in [examples](examples/).
+
+### Remote signal provisioning
+
+- Upload a supported `.sub` or `.ir` file to a selected persistent slot through the authenticated `/flipper` page.
+- Review validation and live slot status, test the stored signal, replace it, or clear it without physical access to the AR01V3.
+- Use Home Assistant to transmit any stored slot or send supported slot-free IR/RF data directly over the ESPHome API.
+- Manage separately addressed AR01V3 gateways from the same trusted network or through a secure VPN.
+- Capturing a previously unknown signal may still require access to the original remote and suitable capture equipment, but provisioning the installed gateway does not.
+
+The embedded web interface uses HTTP Digest authentication but does not provide HTTPS transport encryption. Do not expose it directly to the public Internet; use it on a trusted local network or through a VPN.
 
 ### ESP-RC01 and multiple receivers
 

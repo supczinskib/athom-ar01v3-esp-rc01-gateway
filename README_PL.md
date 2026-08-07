@@ -4,21 +4,33 @@
 
 [English README](README.md)
 
-> **Przechwytuj Flipperem. Automatyzuj z Athom.**
+> **Lokalne sterowanie RF, IR i ESP-RC01 w Home Assistant.**
 
 ```text
 Pilot RF/IR -> Flipper Zero -> plik .sub/.ir -> bramka AR01V3 (+ opcjonalne piloty ESP-RC01) -> Home Assistant
 ```
 
-Społecznościowy firmware ESPHome i integracja z Home Assistant dla opartej na ESP32 bramki RF/IR Athom AR01V3, współpracującej z pilotami ESP-RC01 oraz sygnałami przechwyconymi przez Flipper Zero. Flipper Zero rejestruje i weryfikuje kompatybilne sygnały RF/IR, AR01V3 przechowuje je w trwałych slotach i nadaje, a Home Assistant pozwala wywoływać je za pomocą przycisków, wirtualnych urządzeń, skryptów i automatyzacji.
+Społecznościowy firmware ESPHome, który przekształca oparty na ESP32 Athom AR01V3 w lokalną bramkę RF, IR i ESP-NOW dla Home Assistant. Zapewnia 16 trwałych slotów RF i 10 trwałych slotów IR, zdalne programowanie sygnałów przez sieć, standardowe encje przycisków Home Assistant, parametryzowane i wygodne w GUI akcje nadawania oraz obsługę do 10 pilotów ESP-RC01 przez maksymalnie 10 odbiorników AR01V3 z deduplikacją w Home Assistant. Zapisane polecenia można przypisywać do wirtualnych urządzeń, skryptów, scen i automatyzacji bez zahardkodowanych mapowań sprzętu.
 
 Autor i opiekun projektu: **Bartosz Supcziński** — <bartek@env.pl>
 
 ## Dlaczego powstał ten projekt
 
-Flipper Zero jest bardzo dobrym przenośnym narzędziem do przechwytywania, analizy i sprawdzania sygnałów, ale nie musi pozostawać stale podłączony ani przeznaczony wyłącznie do automatyki domowej. AR01V3 jest niedrogi, zasilany z sieci, podłączony do sieci i może na stałe znajdować się w pomieszczeniu, w którym potrzebny jest nadajnik.
+AR01V3 jest niedrogi, zasilany z sieci, podłączony do sieci i dobrze nadaje się do stałego umieszczenia w pomieszczeniu, w którym trzeba wysyłać polecenia RF lub IR. Projekt zmienia zapisane w nim sygnały w zasoby Home Assistant wielokrotnego użytku zamiast pozostawiać sterowanie wyłącznie na stronie urządzenia. Każdy slot ma osobną encję przycisku, a akcje parametryzowane pozwalają korzystać z zapisanych i przekazywanych bezpośrednio sygnałów z poziomu GUI Home Assistant.
 
-Projekt łączy te dwie role. Zgodny sygnał przechwycony w terenie można zapisać w AR01V3 i udostępnić w Home Assistant bez tworzenia osobnej integracji protokołu dla każdego urządzenia. Lokalna nauka pozostaje dostępna dla sygnałów, które AR01V3 potrafi wiarygodnie zdekodować.
+Gdy dostępny jest zgodny plik albo definicja sygnału, zainstalowaną bramkę można zaprogramować i przetestować przez sieć. Nie trzeba podłączać jej przez USB, ponownie kompilować firmware, znajdować się obok AR01V3 ani przynosić oryginalnego pilota do miejsca instalacji. Jest to szczególnie przydatne dla bramek zamontowanych w oddalonych, trudno dostępnych albo wielu różnych lokalizacjach.
+
+Obsługa ESP-RC01 dodaje drugą rolę: niedrogie fizyczne piloty mogą przez ESP-NOW uruchamiać działania Home Assistant. Kilka odbiorników AR01V3 może słuchać tego samego pilota, zapewniając większy zasięg, a dołączony pakiet Home Assistant usuwa duplikaty odbioru i generuje jedno kanoniczne zdarzenie.
+
+Sygnał można dostarczyć do systemu na trzy sposoby: przez lokalną naukę, import obsługiwanego pliku albo bezpośrednią akcję Home Assistant, która nie korzysta ze slotu. Są to uzupełniające się sposoby wprowadzania danych, a nie główny cel projektu.
+
+## Dodawanie sygnałów i opcjonalna obsługa Flippera
+
+Flipper Zero nie jest wymagany. AR01V3 może bezpośrednio uczyć się obsługiwanych sygnałów IR oraz sygnałów RF, które potrafi zdekodować jako RC-Switch. Import plików zgodnych z Flipperem jest opcjonalną drogą awaryjną, gdy AR01V3 nie potrafi niezawodnie nauczyć się sygnału albo gdy zgodny plik `.sub` lub `.ir` jest już dostępny. Plik można zaimportować bez posiadania urządzenia, którym został pierwotnie przechwycony.
+
+AR01V3 korzysta z niedrogiego sprzętu OOK/ASK pracującego na stałej częstotliwości 433,92 MHz. Sprawdza się jako bramka automatyki, ale nie jest pełnym analizatorem RF i nie można oczekiwać, że niezawodnie zdekoduje każdy własnościowy protokół. Flipper Zero albo inny odpowiedni analizator może dostarczyć zweryfikowane przechwycenie referencyjne dla sygnałów wykraczających poza możliwości niezawodnej lokalnej nauki.
+
+Nie każde przechwycenie RF jest uniwersalne. Plik może zawierać identyfikator nadajnika, kanał, adres albo informacje związane z parowaniem, dlatego sygnał pochodzący z innej instalacji nie musi bez zmian zadziałać z każdym silnikiem lub odbiornikiem. Nawet gdy bezpośrednie wykorzystanie pliku nie jest możliwe, zweryfikowane przechwycenie może dostarczyć danych potrzebnych do poprawienia natywnej obsługi protokołu.
 
 Zakres zgodności jest opisany precyzyjnie: projekt nie obiecuje wysyłania każdego sygnału obsługiwanego przez Flipper Zero. Sprzęt AR01V3 jest ograniczony do RF 433,92 MHz OOK/ASK oraz obsługiwanej ścieżki nadawczej IR.
 
@@ -88,6 +100,16 @@ Każdy zapisany slot IR i RF jest dostępny jako zwykły przycisk Home Assistant
 - IR: parsed NEC i raw timings.
 - Status online, walidacja, import, transmisja testowa, stan przechwytywania i czyszczenie slotu bez przechodzenia do osobnego JSON-a.
 - Neutralne pliki testowe w katalogu [examples](examples/).
+
+### Zdalne programowanie sygnałów
+
+- Wgranie obsługiwanego pliku `.sub` lub `.ir` do wybranego trwałego slotu przez chronioną stronę `/flipper`.
+- Sprawdzenie walidacji i bieżącego stanu slotu, transmisja testowa, zastąpienie sygnału albo jego usunięcie bez fizycznego dostępu do AR01V3.
+- Wysyłanie z Home Assistant dowolnego zapisanego slotu albo obsługiwanych danych IR/RF bez używania slotu, bezpośrednio przez API ESPHome.
+- Osobne zarządzanie bramkami AR01V3 mającymi różne adresy z tej samej zaufanej sieci albo przez bezpieczny VPN.
+- Przechwycenie nieznanego wcześniej sygnału może nadal wymagać dostępu do oryginalnego pilota i odpowiedniego sprzętu, ale zaprogramowanie zainstalowanej bramki już nie.
+
+Wbudowany interfejs WWW korzysta z uwierzytelniania HTTP Digest, ale nie zapewnia szyfrowania transmisji HTTPS. Nie należy wystawiać go bezpośrednio do publicznego Internetu; powinien być używany w zaufanej sieci lokalnej albo przez VPN.
 
 ### ESP-RC01 i wiele odbiorników
 
