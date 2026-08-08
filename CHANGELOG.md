@@ -2,6 +2,19 @@
 
 All notable project changes are documented here.
 
+## 1.1.0 — 2026-08-08
+
+- Added persistent per-receiver assignments for all ten ESP-RC01 pilots and sixteen supported button events.
+- Added compact `Pilot`, `Button`, `Action`, and `Assignment` controls to the authenticated main page.
+- Added autonomous transmission from any stored IR or RF slot without requiring an active Home Assistant connection.
+- Retained `Home Assistant` as the default route and added `Ignore` for buttons that must perform no local or Home Assistant action.
+- Added a complete embedded ESPHome Web Server v3 frontend so the main page does not depend on an external JavaScript service.
+- Kept the assignment, Flipper import, IR, and RF sections stable across initial loading and live updates.
+- Kept IR/RF slot previews hidden until their complete state set is available, preventing temporary values from appearing under the wrong signal type.
+- Preserved the `/flipper` shortcut, readable direct-IR timing controls, and Home Assistant-only stored-slot buttons without duplicating them on the device page.
+- Added generated-resource verification to compilation, OTA, and USB upload scripts so stale embedded frontend code cannot be shipped.
+- Changed fallback-AP setup to reuse the web-interface password by default, with an optional confirmed separate password.
+
 ## 1.0.0 — 2026-08-07
 
 - Established the public project identity `AR01V3 ESP-RC01 Gateway`, repository name `athom-ar01v3-esp-rc01-gateway`, and ESPHome identifier `envpl.ar01v3_esp_rc01_gateway`.

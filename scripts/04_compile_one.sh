@@ -8,7 +8,11 @@ N="$(normalize_device_number "$1")"
 ESPHOME_BIN="$(find_esphome)"
 require_secrets "$ROOT_DIR"
 cd "$ROOT_DIR/esphome"
+"$ESPHOME_BIN" clean "ar01v3-$N.yaml"
 "$ESPHOME_BIN" compile "ar01v3-$N.yaml"
+python3 "$ROOT_DIR/scripts/verify_embedded_main_ui.py" \
+  "$ROOT_DIR/esphome/ar01v3_web_v3.js" \
+  "$ROOT_DIR/esphome/.esphome/build/ar01v3-espnow-$N/src/main.cpp"
 echo
 echo 'Build artifacts:'
 find .esphome/build -type f \( -name 'firmware.factory.bin' -o -name 'firmware.bin' -o -name 'firmware.ota.bin' \) -path "*ar01v3-espnow-$N*" -print 2>/dev/null || true

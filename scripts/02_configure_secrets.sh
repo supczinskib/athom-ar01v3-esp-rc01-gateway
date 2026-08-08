@@ -39,7 +39,6 @@ PY
 OLD_WIFI_SSID="$(read_existing wifi_ssid)"
 OLD_WIFI_PASSWORD="$(read_existing wifi_password)"
 OLD_OTA_PASSWORD="$(read_existing ota_password)"
-OLD_FALLBACK_PASSWORD="$(read_existing fallback_ap_password)"
 OLD_WEB_USERNAME="$(read_existing web_server_username)"
 OLD_WEB_PASSWORD="$(read_existing web_server_password)"
 
@@ -69,7 +68,6 @@ else
 fi
 
 OTA_PASSWORD="${OLD_OTA_PASSWORD:-$(openssl rand -hex 16)}"
-FALLBACK_PASSWORD="${OLD_FALLBACK_PASSWORD:-$(openssl rand -hex 12)}"
 
 DEFAULT_WEB_USERNAME="${OLD_WEB_USERNAME:-admin}"
 read -r -p "Web interface username [$DEFAULT_WEB_USERNAME]: " WEB_USERNAME
@@ -80,21 +78,26 @@ if [[ -z "$WEB_USERNAME" ]]; then
 fi
 
 while true; do
+  REUSING_WEB_PASSWORD=false
   if [[ -n "$OLD_WEB_PASSWORD" ]]; then
     read -r -s -p 'Web interface password [Enter keeps the current value]: ' WEB_PASSWORD
     echo
     if [[ -z "$WEB_PASSWORD" ]]; then
       WEB_PASSWORD="$OLD_WEB_PASSWORD"
-      break
+      REUSING_WEB_PASSWORD=true
     fi
   else
-    read -r -s -p 'Web interface password (at least 12 characters): ' WEB_PASSWORD
+    read -r -s -p 'Web interface password (12-63 characters): ' WEB_PASSWORD
     echo
   fi
 
-  if (( ${#WEB_PASSWORD} < 12 )); then
-    echo 'The web interface password must contain at least 12 characters.' >&2
+  if (( ${#WEB_PASSWORD} < 12 || ${#WEB_PASSWORD} > 63 )); then
+    echo 'The web interface password must contain 12-63 characters.' >&2
     continue
+  fi
+
+  if [[ "$REUSING_WEB_PASSWORD" == true ]]; then
+    break
   fi
 
   read -r -s -p 'Repeat the web interface password: ' WEB_PASSWORD_2
@@ -103,6 +106,30 @@ while true; do
     echo 'The web interface passwords do not match.' >&2
     continue
   fi
+  break
+done
+
+FALLBACK_PASSWORD_SEPARATE=false
+while true; do
+  read -r -s -p 'Fallback AP password [Enter = web password]: ' FALLBACK_PASSWORD
+  echo
+  if [[ -z "$FALLBACK_PASSWORD" ]]; then
+    FALLBACK_PASSWORD="$WEB_PASSWORD"
+    break
+  fi
+
+  if (( ${#FALLBACK_PASSWORD} < 8 || ${#FALLBACK_PASSWORD} > 63 )); then
+    echo 'A separate fallback AP password must contain 8-63 characters.' >&2
+    continue
+  fi
+
+  read -r -s -p 'Repeat the fallback AP password: ' FALLBACK_PASSWORD_2
+  echo
+  if [[ "$FALLBACK_PASSWORD" != "$FALLBACK_PASSWORD_2" ]]; then
+    echo 'The fallback AP passwords do not match.' >&2
+    continue
+  fi
+  FALLBACK_PASSWORD_SEPARATE=true
   break
 done
 
@@ -130,8 +157,14 @@ p.write_text(
 p.chmod(0o600)
 PY
 
-unset WIFI_PASSWORD OLD_WIFI_PASSWORD WEB_PASSWORD WEB_PASSWORD_2 OLD_WEB_PASSWORD
+unset WIFI_PASSWORD OLD_WIFI_PASSWORD WEB_PASSWORD WEB_PASSWORD_2 OLD_WEB_PASSWORD REUSING_WEB_PASSWORD
+unset FALLBACK_PASSWORD FALLBACK_PASSWORD_2
 
 echo "Created or updated: $SECRETS"
-echo 'The OTA and fallback access-point passwords were generated or preserved.'
+echo 'The OTA password was generated or preserved.'
+if [[ "$FALLBACK_PASSWORD_SEPARATE" == true ]]; then
+  echo 'The fallback AP uses a separate password.'
+else
+  echo 'The fallback AP uses the web interface password.'
+fi
 echo 'The web interface uses HTTP Digest authentication.'

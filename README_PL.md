@@ -4,13 +4,13 @@
 
 [English README](README.md)
 
-> **Lokalne sterowanie RF, IR i ESP-RC01 w Home Assistant.**
+> **Lokalne sterowanie RF, IR i ESP-RC01 z Home Assistant lub bez niego.**
 
 ```text
 Pilot RF/IR -> Flipper Zero -> plik .sub/.ir -> bramka AR01V3 (+ opcjonalne piloty ESP-RC01) -> Home Assistant
 ```
 
-Społecznościowy firmware ESPHome, który przekształca oparty na ESP32 Athom AR01V3 w lokalną bramkę RF, IR i ESP-NOW dla Home Assistant. Zapewnia 16 trwałych slotów RF i 10 trwałych slotów IR, zdalne programowanie sygnałów przez sieć, standardowe encje przycisków Home Assistant, parametryzowane i wygodne w GUI akcje nadawania oraz obsługę do 10 pilotów ESP-RC01 przez maksymalnie 10 odbiorników AR01V3 z deduplikacją w Home Assistant. Zapisane polecenia można przypisywać do wirtualnych urządzeń, skryptów, scen i automatyzacji bez zahardkodowanych mapowań sprzętu.
+Społecznościowy firmware ESPHome, który przekształca oparty na ESP32 Athom AR01V3 w lokalną bramkę RF, IR i ESP-NOW. Zapewnia 16 trwałych slotów RF i 10 trwałych slotów IR, zdalne programowanie sygnałów przez sieć, standardowe encje przycisków Home Assistant, parametryzowane i wygodne w GUI akcje nadawania oraz obsługę do 10 pilotów ESP-RC01 przez maksymalnie 10 odbiorników AR01V3. Każdy przycisk ESP-RC01 może zostać przekazany do Home Assistant albo bezpośrednio przypisany do zapisanego slotu IR/RF, co umożliwia autonomiczne działanie bez dostępnego Home Assistant. Zapisane polecenia można również przypisywać do wirtualnych urządzeń, skryptów, scen i automatyzacji bez zahardkodowanych mapowań sprzętu.
 
 Autor i opiekun projektu: **Bartosz Supcziński** — <bartek@env.pl>
 
@@ -20,7 +20,7 @@ AR01V3 jest niedrogi, zasilany z sieci, podłączony do sieci i dobrze nadaje si
 
 Gdy dostępny jest zgodny plik albo definicja sygnału, zainstalowaną bramkę można zaprogramować i przetestować przez sieć. Nie trzeba podłączać jej przez USB, ponownie kompilować firmware, znajdować się obok AR01V3 ani przynosić oryginalnego pilota do miejsca instalacji. Jest to szczególnie przydatne dla bramek zamontowanych w oddalonych, trudno dostępnych albo wielu różnych lokalizacjach.
 
-Obsługa ESP-RC01 dodaje drugą rolę: niedrogie fizyczne piloty mogą przez ESP-NOW uruchamiać działania Home Assistant. Kilka odbiorników AR01V3 może słuchać tego samego pilota, zapewniając większy zasięg, a dołączony pakiet Home Assistant usuwa duplikaty odbioru i generuje jedno kanoniczne zdarzenie.
+Obsługa ESP-RC01 dodaje drugą rolę: niedrogie fizyczne piloty mogą przez ESP-NOW uruchamiać działania Home Assistant albo bezpośrednio wysyłać zapisane polecenie IR/RF z odbierającego AR01V3. Przypisanie lokalne jest zapisane w bramce i nie wymaga aktywnego połączenia z Home Assistant. Dla przycisków przekazywanych do HA kilka odbiorników AR01V3 może słuchać tego samego pilota, zapewniając większy zasięg, a dołączony pakiet usuwa duplikaty odbioru i generuje jedno kanoniczne zdarzenie.
 
 Sygnał można dostarczyć do systemu na trzy sposoby: przez lokalną naukę, import obsługiwanego pliku albo bezpośrednią akcję Home Assistant, która nie korzysta ze slotu. Są to uzupełniające się sposoby wprowadzania danych, a nie główny cel projektu.
 
@@ -50,7 +50,7 @@ Zakres zgodności jest opisany precyzyjnie: projekt nie obiecuje wysyłania każ
 
 ### Główna strona AR01V3
 
-Interfejs ESPHome Web Server v3 łączy sterowanie sygnałami, parowanie ESP-RC01, diagnostykę i zachowane funkcje AR01V3.
+Interfejs ESPHome Web Server v3 łączy sterowanie sygnałami, parowanie ESP-RC01 i autonomiczne przypisania przycisków, diagnostykę oraz zachowane funkcje AR01V3.
 
 ![Główna strona ESPHome AR01V3](docs/images/ar01v3-main-page.png)
 
@@ -115,6 +115,10 @@ Wbudowany interfejs WWW korzysta z uwierzytelniania HTTP Digest, ale nie zapewni
 
 - Dziesięć logicznych slotów parowania ESP-RC01 w każdym AR01V3.
 - Trwałe zapisywanie MAC, 60-sekundowe okno parowania, kasowanie pary, bateria, nazwa i kod przycisku, numer sekwencji, zdarzenia przytrzymania i identyfikator odbiornika.
+- Trwałe przypisania wszystkich 16 obsługiwanych zdarzeń przycisków każdego sparowanego pilota.
+- Dla każdego przycisku można wybrać `Home Assistant`, `Ignore`, dowolny slot IR `0..9` albo dowolny slot RF `0..15`.
+- Lokalne przypisanie IR/RF wykonuje sam AR01V3 i działa bez aktywnego połączenia z Home Assistant.
+- Domyślną akcją każdego przycisku jest `Home Assistant`, dzięki czemu aktualizacja zachowuje dotychczasowe zdarzenia i deduplikację.
 - Maksymalnie dziesięć AR01V3 może pokrywać ten sam obszar. Nie jest to mesh z retransmisją — każdy odbiornik zgłasza bezpośrednio odebraną kopię.
 - Pakiet Home Assistant przyjmuje pierwszą kopię, odrzuca duplikaty z pozostałych odbiorników i generuje jedno zdarzenie `esp_rc01_button`.
 
@@ -170,7 +174,7 @@ Nie należy wgrywać tej konfiguracji do innej rewizji urządzenia bez sprawdzen
 - Debian lub Ubuntu dla gotowych skryptów instalacyjnych; na innym systemie można użyć standardowej instalacji ESPHome.
 - Python 3.12, 3.13 albo 3.14.
 - ESPHome 2026.7.3.
-- Home Assistant z integracją ESPHome, jeżeli mają być używane funkcje HA.
+- Home Assistant z integracją ESPHome, jeżeli mają być używane funkcje HA. Nie jest potrzebny do działania skonfigurowanego wcześniej, autonomicznego przypisania ESP-RC01 do slotu.
 
 Dla stabilnego ESP-NOW wszystkie punkty dostępowe obsługujące odbiorniki powinny używać tego samego, stałego kanału 2,4 GHz. ESP32 przechodzi na kanał swojego Wi-Fi, dlatego automatyczna zmiana kanału może sprawić, że odbiorniki podłączone do różnych AP nie usłyszą tej samej transmisji ESP-NOW.
 
@@ -199,9 +203,10 @@ Należy podać:
 
 - SSID i hasło Wi-Fi 2,4 GHz;
 - login do lokalnego panelu WWW;
-- hasło panelu mające minimum 12 znaków.
+- hasło panelu mające 12-63 znaki;
+- opcjonalnie osobne hasło awaryjnego AP. Enter ustawia hasło panelu WWW.
 
-Skrypt tworzy `esphome/secrets.yaml`, generuje mocne hasła OTA i awaryjnego AP, zachowuje istniejące wartości przy kolejnych uruchomieniach i ustawia prawa `0600`. Plik jest ignorowany przez Git. Nie wolno go publikować ani przesyłać innym osobom.
+Skrypt tworzy `esphome/secrets.yaml`, generuje i zachowuje mocne hasło OTA, a dla awaryjnego AP domyślnie używa hasła panelu WWW. Osobne hasło AP jest zapisywane tylko po jego wpisaniu i powtórzeniu. Plik otrzymuje prawa `0600`, jest ignorowany przez Git i nie wolno go publikować ani przesyłać innym osobom.
 
 Przy konfiguracji ręcznej należy skopiować `esphome/secrets.example.yaml` jako `esphome/secrets.yaml` i zastąpić wszystkie wartości przykładowe.
 
@@ -306,8 +311,7 @@ Po wejściu na `http://ADRES_URZĄDZENIA/` i zalogowaniu dostępne są:
 - status nauki na żywo;
 - podgląd wszystkich slotów;
 - powtórzenia RF i przerwa pomiędzy nimi;
-- wybór slotu pilota ESP-RC01, parowanie, kasowanie, bateria, MAC i diagnostyka pakietów;
-- wszystkie przyciski wysyłania slotów dla HA;
+- parowanie ESP-RC01, bateria, MAC, diagnostyka pakietów oraz trwałe przypisania przycisków do slotów;
 - restart, safe mode, factory reset i diagnostyka;
 - pozycja **Flipper Import Page — PRESS**, otwierająca `/flipper`.
 
@@ -356,7 +360,7 @@ Import do zajętego slotu zastępuje poprzedni rekord. Oryginalne pliki warto za
 
 Główne urządzenie jest widoczne jako **Athom RF IR Remote**. Home Assistant może osobno pokazać **AR01V3 Stored Signal Actions**. To celowe podurządzenie z 26 przyciskami przygotowanymi do użycia w wirtualnych urządzeniach, skryptach, scenach i automatyzacjach.
 
-Jeżeli po aktualizacji firmware przycisków nie widać, przeładuj integrację ESPHome lub uruchom ponownie Home Assistant i sprawdź wersję projektu `1.0.0`.
+Jeżeli po aktualizacji firmware przycisków nie widać, przeładuj integrację ESPHome lub uruchom ponownie Home Assistant i sprawdź wersję projektu `1.1.0`.
 
 ### Wywołanie zapisanego slotu w GUI
 
@@ -447,6 +451,20 @@ Ten sam fizyczny pilot należy zapisać w tym samym logicznym slocie na każdym 
 
 Logiczny slot jest częścią mechanizmu deduplikacji. Ten sam pilot nie może znajdować się w różnych slotach logicznych na różnych odbiornikach.
 
+### Przypisanie przycisku pilota do autonomicznej akcji lokalnej
+
+Najpierw zapisz i przetestuj potrzebne polecenie w slocie IR albo RF. Następnie otwórz chronioną hasłem stronę główną AR01V3, który ma je nadawać:
+
+1. W sekcji **ESP-RC01 Button Assignment** wybierz sparowanego **Pilot**.
+2. Wybierz fizyczny **Button**, w razie potrzeby także wariant przytrzymania.
+3. W polu **Action** wybierz slot IR, slot RF, `Home Assistant` albo `Ignore`.
+4. Sprawdź gotowe mapowanie w wierszu **Assignment**.
+5. Naciśnij fizyczny przycisk i sprawdź reakcję sterowanego urządzenia.
+
+Przypisanie zapisuje się automatycznie i pozostaje po zwykłym restarcie oraz aktualizacji firmware. Lokalna akcja slotu jest wykonywana w całości przez AR01V3, dlatego działa również wtedy, gdy Home Assistant jest niedostępny. Akcje RF korzystają z bieżących ustawień **RF Repeat Count** i **RF Repeat Gap**. `Home Assistant` zachowuje dotychczasową ścieżkę zdarzeń, a `Ignore` nie nadaje sygnału i nie generuje zdarzenia HA.
+
+Każdy odbiornik przechowuje własne przypisania. Jeżeli kilka AR01V3 słyszy ten sam pilot, lokalną akcję należy ustawić tylko na urządzeniu, które ma ją wykonać; w przeciwnym razie kilka odbiorników może nadać to samo polecenie. Deduplikacja Home Assistant dotyczy wyłącznie przycisków przekazywanych do HA, a nie autonomicznych transmisji lokalnych.
+
 ### Instalacja pakietu HA
 
 Najpierw wykonaj kopię konfiguracji Home Assistant. Na systemie z konfiguracją dostępną jako zwykły katalog:
@@ -523,7 +541,7 @@ Zdarzenie zawiera również `sequence`, `button_code`, `battery`, `remote_mac` i
 
 ### Akcji nie widać w HA
 
-- Sprawdź połączenie integracji ESPHome i wersję projektu `1.0.0`.
+- Sprawdź połączenie integracji ESPHome i wersję projektu `1.1.0`.
 - Po aktualizacji firmware przeładuj integrację ESPHome lub zrestartuj HA.
 - Dla slotów wybierz akcję **Przycisk: Naciśnij** i encję `Send IR Slot N` albo `Send RF Slot N`; sensor podglądu nie nadaje.
 - Akcje bezpośrednie zaczynają się od `esphome.<nazwa_węzła>_transmit_...`.
@@ -546,7 +564,7 @@ Następnie trzeba uruchomić `scripts/00_self_test.sh`. Pliku `flipper_page.h` n
 - Pochodzenie elementów zewnętrznych: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 - Zgłaszanie problemów bezpieczeństwa: [SECURITY.md](SECURITY.md).
 - Zasady współtworzenia: [CONTRIBUTING.md](CONTRIBUTING.md).
-- Przygotowane metadane repozytorium i opis wydania GitHub: [GITHUB_PUBLISHING.md](GITHUB_PUBLISHING.md) oraz [.github/releases/v1.0.0.md](.github/releases/v1.0.0.md).
+- Przygotowane metadane repozytorium i opis wydania GitHub: [GITHUB_PUBLISHING.md](GITHUB_PUBLISHING.md) oraz [.github/releases/v1.1.0.md](.github/releases/v1.1.0.md).
 
 Część konfiguracji sprzętowej i komponentu pamięci pochodzi z publicznego repozytorium konfiguracji ESPHome firmy Athom. Athom zachowuje prawa do swojej oryginalnej pracy. Dodatki specyficzne dla tego projektu są udostępniane na licencji `GPL-3.0-only`, a szczegółowe informacje o pochodzeniu i statusie elementów zewnętrznych znajdują się w `THIRD_PARTY_NOTICES.md`.
 

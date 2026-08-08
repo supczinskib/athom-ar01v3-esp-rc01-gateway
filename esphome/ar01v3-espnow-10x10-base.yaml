@@ -10,7 +10,7 @@ substitutions:
   # Project Name
   project_name: "envpl.ar01v3_esp_rc01_gateway"
   # Projection version denotes the release version of the yaml file, allowing checking of deployed vs latest version
-  project_version: "1.0.0"
+  project_version: "1.1.0"
   # Stable identifier included in events sent to Home Assistant
   receiver_id: "ar01v3_1"
   # Define a domain for this device to use. i.e. iot.home.lan (so device will appear as athom-smart-plug-v2.iot.home.lan in DNS/DHCP logs)
@@ -66,6 +66,8 @@ esphome:
             id(rf_signal_select_index) = std::clamp(id(rf_signal_select_index), 0, 15);
             id(signal_slot_select).publish_state("Signal " + std::to_string(id(signal_select_index)));
             id(rf_signal_slot_select).publish_state("Signal " + std::to_string(id(rf_signal_select_index)));
+            id(remote_action_ui_ready) = true;
+        - script.execute: remote_action_refresh_ui
 
 esp32:
   board: esp32dev
@@ -323,6 +325,34 @@ globals:
     type: std::string
     restore_value: no
     initial_value: '"00:00:00:00:00:00"'
+
+  # Per-receiver ESP-RC01 actions. Each byte represents one Pilot/Button pair:
+  # 0 = Home Assistant, 1 = Ignore, 2..11 = IR slot 0..9,
+  # 12..27 = RF slot 0..15. The zero-filled default preserves v1.0 behavior.
+  - id: remote_button_actions
+    type: std::array<uint8_t, 160>
+    restore_value: yes
+    initial_value: "std::array<uint8_t, 160>{}"
+  - id: remote_action_ui_pilot
+    type: uint8_t
+    restore_value: no
+    initial_value: "1"
+  - id: remote_action_ui_button_index
+    type: uint8_t
+    restore_value: no
+    initial_value: "5"
+  - id: remote_action_ui_ready
+    type: bool
+    restore_value: no
+    initial_value: "false"
+  - id: remote_action_ui_syncing
+    type: bool
+    restore_value: no
+    initial_value: "false"
+  - id: remote_dispatch_to_ha
+    type: bool
+    restore_value: no
+    initial_value: "true"
 # Flash storage component for saving IR/RF signals
 Flash_comp:
   id: signal_nvs
@@ -561,11 +591,16 @@ api:
               - api.respond:
                   success: false
                   error_message: "Invalid dynamic Dooya parameters"
-  # Only enable BLE tracking when wifi is up and api is connected
-  # Gives single-core ESP32-C3 devices time to manage wifi and authenticate with api
+  # Initial Home Assistant discovery and BLE scanning temporarily compete for
+  # the same heap. Let the API finish listing entities and actions first.
   on_client_connected:
-     - esp32_ble_tracker.start_scan:
-        continuous: true
+    - delay: 10s
+    - if:
+        condition:
+          api.connected:
+        then:
+          - esp32_ble_tracker.start_scan:
+              continuous: true
   # Disable BLE tracking when there are no api connections live
   on_client_disconnected:
     if:
@@ -590,8 +625,21 @@ mdns:
 web_server:
   port: 80
   version: 3
-  js_include: flipper_link.js
+  # Use ESPHome's built-in, authenticated /0.js handler. The earlier custom
+  # handler could close the connection without sending the helper body.
+  # Keep a versioned resource name. ESPHome's generated-source cache does not
+  # reliably invalidate an embedded js_include when only its contents change.
+  # Use one complete local frontend. Its entity table contains the firmware's
+  # sorting groups directly, so rendering does not depend on SSE listener order.
+  js_url: ""
+  js_include: ar01v3_web_v3.js
+  # Pilot/Button/Action are local web controls. Keep them off the native API
+  # entity listing to reduce heap use during Home Assistant discovery.
+  include_internal: true
   sorting_groups:
+    - id: group_remote_actions
+      name: "ESP-RC01 Button Assignment"
+      sorting_weight: 3
     - id: group_signal_import
       name: "Flipper File Import"
       sorting_weight: 4
@@ -1866,6 +1914,16 @@ text_sensor:
     icon: mdi:clock
     entity_category: diagnostic
 
+  - platform: template
+    name: "Assignment"
+    id: remote_action_status
+    icon: mdi:link-variant
+    internal: true
+    update_interval: never
+    web_server:
+      sorting_group_id: group_remote_actions
+      sorting_weight: 4
+
   # IR learning status display
   - platform: template
     name: "IR Learning Status"
@@ -2135,6 +2193,120 @@ text_sensor:
 # Keep the mapping identical on every AR01V3: the same physical remote must always use the same slot.
 select:
   - platform: template
+    name: "Pilot"
+    id: remote_action_pilot_select
+    icon: mdi:remote
+    internal: true
+    optimistic: true
+    options:
+      - "Pilot 1"
+      - "Pilot 2"
+      - "Pilot 3"
+      - "Pilot 4"
+      - "Pilot 5"
+      - "Pilot 6"
+      - "Pilot 7"
+      - "Pilot 8"
+      - "Pilot 9"
+      - "Pilot 10"
+    initial_option: "Pilot 1"
+    web_server:
+      sorting_group_id: group_remote_actions
+      sorting_weight: 1
+    on_value:
+      - lambda: |-
+          id(remote_action_ui_pilot) = static_cast<uint8_t>(i + 1);
+      - script.execute: remote_action_refresh_ui
+
+  - platform: template
+    name: "Button"
+    id: remote_action_button_select
+    icon: mdi:gesture-tap-button
+    internal: true
+    optimistic: true
+    options:
+      - "ON"
+      - "OFF"
+      - "Night"
+      - "Brightness -"
+      - "Brightness +"
+      - "P1"
+      - "P2"
+      - "P3"
+      - "P4"
+      - "P5"
+      - "P6"
+      - "P7"
+      - "ON Hold"
+      - "OFF Hold"
+      - "Brightness + Hold"
+      - "Brightness - Hold"
+    initial_option: "P1"
+    web_server:
+      sorting_group_id: group_remote_actions
+      sorting_weight: 2
+    on_value:
+      - lambda: |-
+          id(remote_action_ui_button_index) = static_cast<uint8_t>(i);
+      - script.execute: remote_action_refresh_ui
+
+  - platform: template
+    name: "Action"
+    id: remote_action_select
+    icon: mdi:arrow-decision
+    internal: true
+    optimistic: true
+    options:
+      - "Home Assistant"
+      - "Ignore"
+      - "IR Slot 0"
+      - "IR Slot 1"
+      - "IR Slot 2"
+      - "IR Slot 3"
+      - "IR Slot 4"
+      - "IR Slot 5"
+      - "IR Slot 6"
+      - "IR Slot 7"
+      - "IR Slot 8"
+      - "IR Slot 9"
+      - "RF Slot 0"
+      - "RF Slot 1"
+      - "RF Slot 2"
+      - "RF Slot 3"
+      - "RF Slot 4"
+      - "RF Slot 5"
+      - "RF Slot 6"
+      - "RF Slot 7"
+      - "RF Slot 8"
+      - "RF Slot 9"
+      - "RF Slot 10"
+      - "RF Slot 11"
+      - "RF Slot 12"
+      - "RF Slot 13"
+      - "RF Slot 14"
+      - "RF Slot 15"
+    initial_option: "Home Assistant"
+    web_server:
+      sorting_group_id: group_remote_actions
+      sorting_weight: 3
+    on_value:
+      - if:
+          condition:
+            lambda: |-
+              return id(remote_action_ui_ready) && !id(remote_action_ui_syncing);
+          then:
+            - lambda: |-
+                const size_t mapping_index =
+                    (static_cast<size_t>(id(remote_action_ui_pilot)) - 1U) * 16U +
+                    static_cast<size_t>(id(remote_action_ui_button_index));
+                if (mapping_index >= id(remote_button_actions).size() || i > 27U) return;
+                id(remote_button_actions)[mapping_index] = static_cast<uint8_t>(i);
+                ESP_LOGI("espnow_actions", "Saved Pilot %u button index %u -> %s",
+                         static_cast<unsigned>(id(remote_action_ui_pilot)),
+                         static_cast<unsigned>(id(remote_action_ui_button_index)), x.c_str());
+            - script.execute: remote_action_refresh_ui
+
+  - platform: template
     name: "ESP-NOW Pairing Slot"
     id: remote_pairing_slot_select
     optimistic: true
@@ -2279,6 +2451,43 @@ number:
 
 # Scripts for sending stored/imported signals
 script:
+  - id: remote_action_refresh_ui
+    mode: restart
+    then:
+      - lambda: |-
+          if (!id(remote_action_ui_ready)) return;
+          id(remote_action_ui_pilot) = std::clamp<uint8_t>(id(remote_action_ui_pilot), 1, 10);
+          id(remote_action_ui_button_index) =
+              std::clamp<uint8_t>(id(remote_action_ui_button_index), 0, 15);
+          const size_t mapping_index =
+              (static_cast<size_t>(id(remote_action_ui_pilot)) - 1U) * 16U +
+              static_cast<size_t>(id(remote_action_ui_button_index));
+          uint8_t action = id(remote_button_actions)[mapping_index];
+          if (action > 27U) {
+            action = 0;
+            id(remote_button_actions)[mapping_index] = 0;
+          }
+
+          static const char *const button_labels[16] = {
+              "ON", "OFF", "Night", "Brightness -", "Brightness +",
+              "P1", "P2", "P3", "P4", "P5", "P6", "P7",
+              "ON Hold", "OFF Hold", "Brightness + Hold", "Brightness - Hold"};
+          std::string action_label;
+          if (action == 0U) action_label = "Home Assistant";
+          else if (action == 1U) action_label = "Ignore";
+          else if (action <= 11U) action_label = "IR Slot " + std::to_string(action - 2U);
+          else action_label = "RF Slot " + std::to_string(action - 12U);
+
+          id(remote_action_ui_syncing) = true;
+          id(remote_action_select).publish_state(static_cast<size_t>(action));
+          id(remote_action_ui_syncing) = false;
+
+          char status[96];
+          snprintf(status, sizeof(status), "Pilot %u / %s -> %s",
+                   static_cast<unsigned>(id(remote_action_ui_pilot)),
+                   button_labels[id(remote_action_ui_button_index)], action_label.c_str());
+          id(remote_action_status).publish_state(status);
+
   - id: send_raw_signal
     then:
       - lambda: |-
@@ -2462,23 +2671,24 @@ script:
     then:
       - lambda: |-
           const char *button_name = "unknown";
+          int button_index = -1;
           switch (button_code) {
-            case 1: button_name = "on"; break;
-            case 2: button_name = "off"; break;
-            case 3: button_name = "night"; break;
-            case 8: button_name = "brightness_down"; break;
-            case 9: button_name = "brightness_up"; break;
-            case 16: button_name = "p1"; break;
-            case 17: button_name = "p2"; break;
-            case 18: button_name = "p3"; break;
-            case 19: button_name = "p4"; break;
-            case 20: button_name = "p5"; break;
-            case 21: button_name = "p6"; break;
-            case 22: button_name = "p7"; break;
-            case 100: button_name = "on_hold"; break;
-            case 101: button_name = "off_hold"; break;
-            case 102: button_name = "brightness_up_hold"; break;
-            case 103: button_name = "brightness_down_hold"; break;
+            case 1: button_name = "on"; button_index = 0; break;
+            case 2: button_name = "off"; button_index = 1; break;
+            case 3: button_name = "night"; button_index = 2; break;
+            case 8: button_name = "brightness_down"; button_index = 3; break;
+            case 9: button_name = "brightness_up"; button_index = 4; break;
+            case 16: button_name = "p1"; button_index = 5; break;
+            case 17: button_name = "p2"; button_index = 6; break;
+            case 18: button_name = "p3"; button_index = 7; break;
+            case 19: button_name = "p4"; button_index = 8; break;
+            case 20: button_name = "p5"; button_index = 9; break;
+            case 21: button_name = "p6"; button_index = 10; break;
+            case 22: button_name = "p7"; button_index = 11; break;
+            case 100: button_name = "on_hold"; button_index = 12; break;
+            case 101: button_name = "off_hold"; button_index = 13; break;
+            case 102: button_name = "brightness_up_hold"; button_index = 14; break;
+            case 103: button_name = "brightness_down_hold"; button_index = 15; break;
           }
 
           const std::array<uint8_t, 6> *mac = &id(remote_mac_1);
@@ -2506,28 +2716,66 @@ script:
           snprintf(packet_text, sizeof(packet_text), "%d:%s:%d", remote_slot,
                    sequence.c_str(), button_code);
           id(remote_last_packet_text).publish_state(packet_text);
-          id(espnow_remote_raw_event).trigger(button_name);
           ESP_LOGI("espnow_10x10", "RX %s slot=%d seq=%s button=%s battery=%d",
                    mac_text, remote_slot, sequence.c_str(), button_name, battery);
 
-      - homeassistant.event:
-          event: esphome.esp_rc01_raw
-          data:
-            receiver: "${receiver_id}"
-          data_template:
-            remote_slot: "{{ remote_slot }}"
-            sequence: "{{ sequence }}"
-            button_code: "{{ button_code }}"
-            button: "{{ button }}"
-            battery: "{{ battery }}"
-            remote_mac: "{{ remote_mac }}"
-          variables:
-            remote_slot: !lambda 'return remote_slot;'
-            sequence: !lambda 'return sequence;'
-            button_code: !lambda 'return button_code;'
-            button: !lambda 'return id(remote_current_button_name);'
-            battery: !lambda 'return battery;'
-            remote_mac: !lambda 'return id(remote_current_mac);'
+          uint8_t action = 0;
+          if (remote_slot >= 1 && remote_slot <= 10 && button_index >= 0) {
+            const size_t mapping_index =
+                (static_cast<size_t>(remote_slot) - 1U) * 16U +
+                static_cast<size_t>(button_index);
+            action = id(remote_button_actions)[mapping_index];
+            if (action > 27U) action = 0;
+          }
+          id(remote_dispatch_to_ha) = action == 0U;
+
+          if (action == 0U) {
+            id(espnow_remote_raw_event).trigger(button_name);
+          } else if (action == 1U) {
+            ESP_LOGI("espnow_actions", "Pilot %d button %s ignored locally",
+                     remote_slot, button_name);
+          } else if (action <= 11U) {
+            const uint8_t slot = action - 2U;
+            const bool sent = id(flipper_web_importer).send_ir_slot(slot);
+            ESP_LOGI("espnow_actions", "Pilot %d button %s -> IR slot %u: %s",
+                     remote_slot, button_name, static_cast<unsigned>(slot),
+                     sent ? "sent" : "failed");
+          } else {
+            const uint8_t slot = action - 12U;
+            const float repeat_state = id(rf_repeat_count).state;
+            const float gap_state = id(rf_repeat_gap_ms).state;
+            const uint32_t repeats = repeat_state >= 1.0f && repeat_state <= 20.0f
+                ? static_cast<uint32_t>(repeat_state) : 5U;
+            const uint32_t gap_ms = gap_state >= 0.0f && gap_state <= 50.0f
+                ? static_cast<uint32_t>(gap_state) : 0U;
+            const bool sent = id(flipper_web_importer).send_rf_slot(slot, repeats, gap_ms * 1000U);
+            ESP_LOGI("espnow_actions", "Pilot %d button %s -> RF slot %u: %s",
+                     remote_slot, button_name, static_cast<unsigned>(slot),
+                     sent ? "sent" : "failed");
+          }
+
+      - if:
+          condition:
+            lambda: 'return id(remote_dispatch_to_ha);'
+          then:
+            - homeassistant.event:
+                event: esphome.esp_rc01_raw
+                data:
+                  receiver: "${receiver_id}"
+                data_template:
+                  remote_slot: "{{ remote_slot }}"
+                  sequence: "{{ sequence }}"
+                  button_code: "{{ button_code }}"
+                  button: "{{ button }}"
+                  battery: "{{ battery }}"
+                  remote_mac: "{{ remote_mac }}"
+                variables:
+                  remote_slot: !lambda 'return remote_slot;'
+                  sequence: !lambda 'return sequence;'
+                  button_code: !lambda 'return button_code;'
+                  button: !lambda 'return id(remote_current_button_name);'
+                  battery: !lambda 'return battery;'
+                  remote_mac: !lambda 'return id(remote_current_mac);'
 
 time:
   - platform: sntp

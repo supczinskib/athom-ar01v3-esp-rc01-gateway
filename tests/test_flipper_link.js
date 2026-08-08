@@ -1,116 +1,60 @@
 "use strict";
 
-let clickHandler;
-let redirectedTo = null;
-let visibleRows = [];
-const animationFrames = [];
+const fs = require("fs");
+const path = require("path");
 
-global.Element = class Element {
-  constructor(textContent = "", className = "", children = []) {
-    this.textContent = textContent;
-    this.children = children;
-    this.style = {};
-    this.classList = {
-      contains: (candidate) => className.split(/\s+/).includes(candidate),
-    };
-  }
-};
+const uiPath = path.join(__dirname, "../esphome/ar01v3_web_v3.js");
+const source = fs.readFileSync(uiPath, "utf8");
 
-global.document = {
-  querySelectorAll(selector) {
-    return selector === ".entity-row" ? visibleRows : [];
-  },
-};
-global.requestAnimationFrame = (callback) => {
-  animationFrames.push(callback);
-};
-
-global.window = {
-  addEventListener(type, handler, capture) {
-    if (type !== "click" || capture !== true) throw new Error("wrong listener registration");
-    clickHandler = handler;
-  },
-  location: {
-    assign(path) {
-      redirectedTo = path;
-    },
-  },
-};
-
-require("../esphome/flipper_link.js");
-
-function slotRow(name) {
-  return new Element(`${name} state`, "entity-row", [
-    new Element(""),
-    new Element(name),
-    new Element("state"),
-  ]);
-}
-
-visibleRows = [slotRow("IR Slot 0"), slotRow("RF Slot 0")];
-animationFrames.shift()();
-if (visibleRows.some((row) => row.children[2].style.visibility !== "hidden")) {
-  throw new Error("incomplete slot values were not hidden");
-}
-
-visibleRows = [
-  ...Array.from({ length: 10 }, (_, slot) => slotRow(`IR Slot ${slot}`)),
-  ...Array.from({ length: 16 }, (_, slot) => slotRow(`RF Slot ${slot}`)),
+const requiredGroups = [
+  "ESP-RC01 Button Assignment",
+  "Flipper File Import",
+  "IR Signals",
+  "RF 433.92 MHz Signals",
 ];
-animationFrames.shift()();
-if (visibleRows.some((row) => row.children[2].style.visibility !== "hidden")) {
-  throw new Error("slot values were revealed before the layout stabilized");
+
+if (!source.startsWith("var Qr=Object.defineProperty;")) {
+  throw new Error("local ESPHome v3 frontend is missing or has an unexpected format");
 }
-animationFrames.shift()();
-if (visibleRows.some((row) => row.children[2].style.visibility !== "")) {
-  throw new Error("complete slot values were not revealed");
+if (!source.includes('G=Di([Rt("esp-entity-table")],G)')) {
+  throw new Error("local frontend does not contain the ESPHome entity table");
+}
+for (const group of requiredGroups) {
+  const occurrences = source.split(`name:"${group}"`).length - 1;
+  if (occurrences !== 1) {
+    throw new Error(`expected one built-in group definition for ${group}, found ${occurrences}`);
+  }
 }
 
-function click(path) {
-  let prevented = false;
-  let stopped = false;
-  clickHandler({
-    composedPath: () => path,
-    preventDefault: () => {
-      prevented = true;
-    },
-    stopImmediatePropagation: () => {
-      stopped = true;
-    },
-  });
-  return { prevented, stopped };
+const defaults =
+  'this.groups=G.ENTITY_CATEGORIES.map((e,n)=>({name:e,sorting_weight:n})),' +
+  'this.groups.push({name:G.ENTITY_UNDEFINED,sorting_weight:-1},' +
+  '{name:"ESP-RC01 Button Assignment",sorting_weight:3}';
+if (!source.includes(defaults)) {
+  throw new Error("custom groups are not initialized with the native entity-table defaults");
+}
+if (source.includes("ar01v3StockUi") || source.includes("patchEntityTableClass")) {
+  throw new Error("obsolete asynchronous frontend bootstrap is still present");
+}
+for (const marker of [
+  'i.name==="Flipper Import Page"',
+  'window.location.assign("/flipper")',
+  's.name!=="Home Assistant Slot Buttons"',
+  'style="display:flex;align-items:center;gap:8px;width:100%"',
+  'style="flex:1 1 auto;width:auto;min-width:0"',
+  'this._slotValuesReady=!1',
+  'setTimeout(()=>{this._slotValuesReady=!0,this.requestUpdate()},8e3)',
+  'this.entities.filter(s=>a.test(s.name)).length===26',
+  '!c&&a.test(o.name)?"":o.state',
+]) {
+  if (!source.includes(marker)) throw new Error(`missing UI enhancement: ${marker}`);
+}
+for (const obsolete of ["collectSlotRows", "stabilizeSlotRows", "setValuesVisible", "completeFrames"]) {
+  if (source.includes(obsolete)) throw new Error(`obsolete DOM slot scanner remains: ${obsolete}`);
 }
 
-const appRoot = new Element("Flipper Import Page PRESS IR Clear PRESS RF Clear PRESS");
-const ordinaryRow = new Element("RF Clear PRESS", "entity-row", [
-  new Element(""),
-  new Element("RF Clear"),
-  new Element("PRESS"),
-]);
-const ordinary = click([
-  new Element("PRESS"),
-  new Element("PRESS"),
-  ordinaryRow,
-  appRoot,
-]);
-if (redirectedTo !== null || ordinary.prevented || ordinary.stopped) {
-  throw new Error("ordinary PRESS button was intercepted");
-}
-
-const flipperRow = new Element("Flipper Import Page PRESS", "entity-row", [
-  new Element(""),
-  new Element("Flipper Import Page"),
-  new Element("PRESS"),
-]);
-const flipper = click([
-  new Element("PRESS"),
-  new Element("PRESS"),
-  flipperRow,
-  appRoot,
-]);
-if (redirectedTo !== "/flipper" || !flipper.prevented || !flipper.stopped) {
-  throw new Error("Flipper PRESS button did not redirect exclusively");
-}
-
-console.log("OK: Flipper link intercepts only its own PRESS button");
-console.log("OK: slot values stay hidden until all 26 rows are stable");
+console.log("OK: complete ESPHome v3 frontend is embedded locally");
+console.log("OK: all four visible custom groups are initialized inside the entity table");
+console.log("OK: no asynchronous AR01V3 frontend loader remains");
+console.log("OK: Flipper link, IR layout and HA hiding are patched natively");
+console.log("OK: slot previews wait for all 26 entities without scanning the DOM");

@@ -4,13 +4,13 @@
 
 [Polska wersja README](README_PL.md)
 
-> **Local RF, IR, and ESP-RC01 control for Home Assistant.**
+> **Local RF, IR, and ESP-RC01 control with or without Home Assistant.**
 
 ```text
 RF/IR remote -> Flipper Zero -> .sub/.ir file -> AR01V3 gateway (+ optional ESP-RC01 remotes) -> Home Assistant
 ```
 
-Community ESPHome firmware that turns the ESP32-based Athom AR01V3 into a local RF, IR, and ESP-NOW gateway for Home Assistant. It provides 16 persistent RF slots and 10 persistent IR slots, remote signal provisioning over the network, standard Home Assistant button entities, parameterized and GUI-friendly transmission actions, and support for up to 10 ESP-RC01 remotes across up to 10 AR01V3 receivers with Home Assistant deduplication. The stored commands can be assigned to virtual devices, scripts, scenes, and automations without hard-coded appliance mappings.
+Community ESPHome firmware that turns the ESP32-based Athom AR01V3 into a local RF, IR, and ESP-NOW gateway. It provides 16 persistent RF slots and 10 persistent IR slots, remote signal provisioning over the network, standard Home Assistant button entities, parameterized and GUI-friendly transmission actions, and support for up to 10 ESP-RC01 remotes across up to 10 AR01V3 receivers. Each ESP-RC01 button can either be routed to Home Assistant or assigned directly to a stored IR/RF slot, allowing autonomous operation when Home Assistant is unavailable. The stored commands can also be assigned to virtual devices, scripts, scenes, and automations without hard-coded appliance mappings.
 
 Author and maintainer: **Bartosz Supcziński** — <bartek@env.pl>
 
@@ -20,7 +20,7 @@ The AR01V3 is inexpensive, mains powered, network connected, and well suited to 
 
 Once a compatible signal file or definition is available, an installed gateway can be provisioned and tested over the network. There is no need to connect it by USB, rebuild the firmware, stand next to the AR01V3, or bring the original remote to its location. This is particularly useful for gateways mounted in remote, difficult-to-reach, or multiple locations.
 
-ESP-RC01 support adds a second role: inexpensive physical remotes can trigger Home Assistant actions through ESP-NOW. Several AR01V3 receivers can hear the same remote for wider coverage, while the supplied Home Assistant package removes duplicate receptions and emits one canonical event.
+ESP-RC01 support adds a second role: inexpensive physical remotes can trigger Home Assistant actions through ESP-NOW or directly transmit a stored IR/RF command from the receiving AR01V3. The local assignment is stored in the gateway and does not require an active Home Assistant connection. For buttons routed to Home Assistant, several AR01V3 receivers can hear the same remote for wider coverage, while the supplied package removes duplicate receptions and emits one canonical event.
 
 Signals can enter the system in three ways: local learning, import of a supported file, or a direct Home Assistant action that does not use a slot. These are complementary input methods, not the main purpose of the project.
 
@@ -50,7 +50,7 @@ The compatibility claim is intentionally precise: this is not a promise to trans
 
 ### AR01V3 main page
 
-The ESPHome Web Server v3 interface combines signal control, ESP-RC01 pairing, diagnostics, and the existing AR01V3 functions.
+The ESPHome Web Server v3 interface combines signal control, ESP-RC01 pairing and autonomous button assignments, diagnostics, and the existing AR01V3 functions.
 
 ![AR01V3 ESPHome main page](docs/images/ar01v3-main-page.png)
 
@@ -115,6 +115,10 @@ The embedded web interface uses HTTP Digest authentication but does not provide 
 
 - Ten logical ESP-RC01 pairing slots on every AR01V3 receiver.
 - Persistent remote MAC pairing, 60-second pairing window, clearing, battery value, button name/code, packet sequence, hold events, and receiver identity.
+- Persistent assignments for all 16 supported button events of every paired remote.
+- Per-button choices: `Home Assistant`, `Ignore`, any IR slot `0..9`, or any RF slot `0..15`.
+- A local IR/RF assignment is executed by the AR01V3 itself and continues to work without an active Home Assistant connection.
+- `Home Assistant` is the default for every assignment, preserving the original event and deduplication behavior after an upgrade.
 - Up to ten AR01V3 receivers may cover the same area. They do not retransmit packets; each receiver reports what it heard.
 - The supplied Home Assistant package accepts the first copy and discards duplicates received by other AR01V3 units, then emits one canonical `esp_rc01_button` event.
 
@@ -170,7 +174,7 @@ Do not flash this configuration to a different hardware revision without verifyi
 - Debian or Ubuntu for the supplied installation scripts. Other systems can use a normal ESPHome installation.
 - Python 3.12, 3.13, or 3.14.
 - ESPHome 2026.7.3. The installation helper pins this version because the configuration uses current API action and Web Server features.
-- Home Assistant with the ESPHome integration for Home Assistant control.
+- Home Assistant with the ESPHome integration for Home Assistant control. It is not required for an already configured autonomous ESP-RC01-to-slot assignment.
 
 For ESP-NOW reliability, configure all access points serving these receivers to use the same fixed 2.4 GHz channel. An ESP32 follows its Wi-Fi channel, so automatic channel changes can prevent receivers on different access points from hearing the same ESP-NOW transmission.
 
@@ -203,9 +207,10 @@ Enter:
 
 - the 2.4 GHz Wi-Fi SSID and password;
 - the local web-interface username;
-- a web password of at least 12 characters.
+- a web password of 12-63 characters;
+- optionally, a separate fallback-AP password. Press Enter to reuse the web password.
 
-The script creates `esphome/secrets.yaml`, generates strong OTA and fallback-access-point passwords, preserves existing values on later runs, and sets file mode `0600`. This file is ignored by Git. Never commit or share it.
+The script creates `esphome/secrets.yaml`, generates and preserves a strong OTA password, uses the web password for the fallback AP unless a separate password is entered, and sets file mode `0600`. This file is ignored by Git. Never commit or share it.
 
 For a manual setup, copy `esphome/secrets.example.yaml` to `esphome/secrets.yaml` and replace every placeholder.
 
@@ -312,8 +317,7 @@ Open `http://DEVICE_ADDRESS/` and authenticate. The main page provides:
 - live learning status;
 - preview rows for every IR and RF slot;
 - RF repeat and repeat-gap controls;
-- ESP-RC01 pairing slot, pair, clear, battery, MAC, and recent packet diagnostics;
-- all stored-slot send buttons;
+- ESP-RC01 pairing, battery, MAC, recent packet diagnostics, and persistent button-to-slot assignments;
 - restart, safe mode, factory reset, and diagnostics;
 - a **Flipper Import Page — PRESS** entry that opens `/flipper`.
 
@@ -362,7 +366,7 @@ Importing into an occupied slot replaces its previous record. Keep original sign
 
 The primary device appears as **Athom RF IR Remote**. Home Assistant may show **AR01V3 Stored Signal Actions** as a second sub-device. This is intentional: the second device contains the 26 GUI buttons designed for virtual devices, scripts, scenes, and automations.
 
-If those buttons do not appear after a firmware update, reload the ESPHome integration or restart Home Assistant. Confirm that the device reports project version `1.0.0`.
+If those buttons do not appear after a firmware update, reload the ESPHome integration or restart Home Assistant. Confirm that the device reports project version `1.1.0`.
 
 ### Use a stored slot in the GUI
 
@@ -453,6 +457,20 @@ Pair the same physical ESP-RC01 into the same logical slot on every AR01V3 that 
 
 The logical slot is part of Home Assistant's deduplication key. Do not place one physical remote in different logical slots on different receivers.
 
+### Assign a remote button to an autonomous local action
+
+First store and test the required command in an IR or RF slot. Then open the authenticated main page of the AR01V3 that should transmit it:
+
+1. Under **ESP-RC01 Button Assignment**, choose the paired **Pilot**.
+2. Choose the physical **Button**, including a hold variant when required.
+3. Under **Action**, select an IR slot, an RF slot, `Home Assistant`, or `Ignore`.
+4. Confirm the resulting mapping in the **Assignment** row.
+5. Press the physical button and verify the target device reacts.
+
+The mapping is saved automatically and survives a normal reboot or firmware update. A local slot action is executed entirely by the AR01V3, so it still works when Home Assistant is offline. RF actions use the current **RF Repeat Count** and **RF Repeat Gap** settings. `Home Assistant` keeps the original event path, while `Ignore` performs no transmission and emits no Home Assistant event.
+
+Assignments are stored independently on each receiver. If several AR01V3 units hear the same remote, configure the local action only on the unit that should transmit it; otherwise multiple receivers can execute the same command. Home Assistant deduplication applies only to buttons routed to Home Assistant, not to autonomous local transmissions.
+
 ### Install the Home Assistant package
 
 Back up the Home Assistant configuration first. On a Home Assistant host where the configuration directory is available as a normal filesystem, run:
@@ -537,7 +555,7 @@ The canonical event also includes `sequence`, `button_code`, `battery`, `remote_
 
 ### Home Assistant action search is empty
 
-- Confirm the ESPHome integration is connected and the receiver runs version `1.0.0`.
+- Confirm the ESPHome integration is connected and the receiver runs version `1.1.0`.
 - Reload the ESPHome integration or restart Home Assistant after a firmware upgrade that adds actions.
 - For stored signals, search for **Button: Press** and select a `Send IR Slot N` or `Send RF Slot N` entity. Do not search for the preview sensor.
 - Direct actions begin with `esphome.<node_name>_transmit_...`.
@@ -560,7 +578,7 @@ Run `scripts/00_self_test.sh` afterward. Do not edit `flipper_page.h` by hand.
 - Third-party provenance: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 - Security reports: [SECURITY.md](SECURITY.md).
 - Contribution rules: [CONTRIBUTING.md](CONTRIBUTING.md).
-- Prepared GitHub repository metadata and release text: [GITHUB_PUBLISHING.md](GITHUB_PUBLISHING.md) and [.github/releases/v1.0.0.md](.github/releases/v1.0.0.md).
+- Prepared GitHub repository metadata and release text: [GITHUB_PUBLISHING.md](GITHUB_PUBLISHING.md) and [.github/releases/v1.1.0.md](.github/releases/v1.1.0.md).
 
 Parts of the hardware configuration and storage component originate from Athom's public ESPHome configuration repository. Athom retains all rights to its original work. Project-specific additions are provided under `GPL-3.0-only`; the detailed attribution and licensing status of upstream material are recorded separately in `THIRD_PARTY_NOTICES.md`.
 
