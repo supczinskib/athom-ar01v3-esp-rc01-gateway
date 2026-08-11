@@ -367,7 +367,7 @@ Importing into an occupied slot replaces its previous record. Keep original sign
 
 The primary device appears as **Athom RF IR Remote**. Home Assistant may show **AR01V3 Stored Signal Actions** as a second sub-device. This is intentional: the second device contains the 26 GUI buttons designed for virtual devices, scripts, scenes, and automations.
 
-If those buttons do not appear after a firmware update, reload the ESPHome integration or restart Home Assistant. Confirm that the device reports project version `1.1.1`.
+If those buttons do not appear after a firmware update, reload the ESPHome integration or restart Home Assistant. Confirm that the device reports project version `1.1.2`.
 
 ### Use a stored slot in the GUI
 
@@ -518,6 +518,8 @@ On the AR01V3 page, every button handled by the blueprint must use the `Home Ass
 
 For a single AR01V3 receiver, choose the required `ESP-NOW Pilot N Button` event entity as the trigger and select its event type, such as `on`, `off`, or `p1`. Because every pilot has a separate entity, no pilot-number template or YAML filter is required.
 
+These event entities remain available in Home Assistant but are omitted from the embedded AR01V3 web page because they are event sources, not local controls.
+
 When several AR01V3 receivers hear the same pilot, use the installed deduplication package and an **Event** trigger. Set its event type to the pilot-specific name, for example `esp_rc01_pilot_1_button`, and set event data to the required button:
 
 ```yaml
@@ -590,7 +592,7 @@ The pilot-specific event also includes `sequence`, `button_code`, `battery`, `re
 
 ### Home Assistant action search is empty
 
-- Confirm the ESPHome integration is connected and the receiver runs version `1.1.1`.
+- Confirm the ESPHome integration is connected and the receiver runs version `1.1.2`.
 - Reload the ESPHome integration or restart Home Assistant after a firmware upgrade that adds actions.
 - For stored signals, search for **Button: Press** and select a `Send IR Slot N` or `Send RF Slot N` entity. Do not search for the preview sensor.
 - Direct actions begin with `esphome.<node_name>_transmit_...`.

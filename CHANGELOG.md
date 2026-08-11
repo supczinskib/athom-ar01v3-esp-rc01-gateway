@@ -4,9 +4,12 @@ All notable project changes are documented here.
 
 ## Unreleased
 
+## 1.1.2 — 2026-08-11
+
 - Added a Home Assistant blueprint that configures all actions of one logical ESP-RC01 pilot in a single GUI automation.
 - Extended the Home Assistant package installer to install the blueprint automatically.
 - Fixed pilot-specific Home Assistant event emission by using literal event names selected for logical Pilot 1 through Pilot 10.
+- Hid the ten pilot event entities from the embedded AR01V3 web page while retaining them in Home Assistant.
 
 ## 1.1.1 — 2026-08-10
 

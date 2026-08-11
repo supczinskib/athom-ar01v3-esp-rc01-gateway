@@ -28,9 +28,9 @@ Both README files include the status badge for `.github/workflows/ci.yml`. It wi
 1. Run `bash scripts/00_self_test.sh --publication` in a clean tree.
 2. Run `bash scripts/03_validate_all.sh` in a configured development tree.
 3. Compile and hardware-test at least receiver 01.
-4. Create tag `v1.1.1` from the tested commit.
-5. Create a GitHub release named `AR01V3 ESP-RC01 Gateway v1.1.1`.
-6. Use `.github/releases/v1.1.1.md` as the release description.
+4. Create tag `v1.1.2` from the tested commit.
+5. Create a GitHub release named `AR01V3 ESP-RC01 Gateway v1.1.2`.
+6. Use `.github/releases/v1.1.2.md` as the release description.
 7. Attach the clean source archive and its SHA-256 checksum.
 
 ## Screenshots

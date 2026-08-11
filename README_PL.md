@@ -361,7 +361,7 @@ Import do zajętego slotu zastępuje poprzedni rekord. Oryginalne pliki warto za
 
 Główne urządzenie jest widoczne jako **Athom RF IR Remote**. Home Assistant może osobno pokazać **AR01V3 Stored Signal Actions**. To celowe podurządzenie z 26 przyciskami przygotowanymi do użycia w wirtualnych urządzeniach, skryptach, scenach i automatyzacjach.
 
-Jeżeli po aktualizacji firmware przycisków nie widać, przeładuj integrację ESPHome lub uruchom ponownie Home Assistant i sprawdź wersję projektu `1.1.1`.
+Jeżeli po aktualizacji firmware przycisków nie widać, przeładuj integrację ESPHome lub uruchom ponownie Home Assistant i sprawdź wersję projektu `1.1.2`.
 
 ### Wywołanie zapisanego slotu w GUI
 
@@ -512,6 +512,8 @@ Na stronie AR01V3 każdy przycisk obsługiwany przez schemat musi mieć przypisa
 
 Przy jednym odbiorniku AR01V3 wybierz jako wyzwalacz właściwą encję zdarzeń `ESP-NOW Pilot N Button`, a następnie typ zdarzenia, np. `on`, `off` albo `p1`. Każdy pilot ma osobną encję, dlatego nie jest potrzebny filtr numeru pilota ani szablon YAML.
 
+Encje te pozostają dostępne w Home Assistant, ale nie są wyświetlane na wbudowanej stronie WWW AR01V3, ponieważ są źródłami zdarzeń, a nie lokalnymi elementami sterującymi.
+
 Jeżeli ten sam pilot jest odbierany przez kilka AR01V3, użyj zainstalowanego pakietu deduplikującego i wyzwalacza **Zdarzenie**. Jako typ wpisz nazwę konkretnego pilota, np. `esp_rc01_pilot_1_button`, a w danych zdarzenia podaj przycisk:
 
 ```yaml
@@ -576,7 +578,7 @@ Zdarzenie pilota zawiera również `sequence`, `button_code`, `battery`, `remote
 
 ### Akcji nie widać w HA
 
-- Sprawdź połączenie integracji ESPHome i wersję projektu `1.1.1`.
+- Sprawdź połączenie integracji ESPHome i wersję projektu `1.1.2`.
 - Po aktualizacji firmware przeładuj integrację ESPHome lub zrestartuj HA.
 - Dla slotów wybierz akcję **Przycisk: Naciśnij** i encję `Send IR Slot N` albo `Send RF Slot N`; sensor podglądu nie nadaje.
 - Akcje bezpośrednie zaczynają się od `esphome.<nazwa_węzła>_transmit_...`.

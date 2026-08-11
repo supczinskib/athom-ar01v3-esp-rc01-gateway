@@ -67,7 +67,7 @@ errors: list[str] = []
 
 required_base = (
     'project_name: "envpl.ar01v3_esp_rc01_gateway"',
-    'project_version: "1.1.1"',
+    'project_version: "1.1.2"',
     'type: digest',
     'username: !secret web_server_username',
     'password: !secret web_server_password',
@@ -246,6 +246,7 @@ for marker in (
     'setTimeout(()=>{this._slotValuesReady=!0,this.requestUpdate()},8e3)',
     'this.entities.filter(s=>a.test(s.name)).length===26',
     '!c&&a.test(o.name)?"":o.state',
+    '.filter(s=>!/^ESP-NOW Pilot (?:[1-9]|10) Button$/.test(s.name))',
 ):
     if marker not in main_ui:
         errors.append(f"missing main-page UI marker: {marker}")
@@ -281,7 +282,7 @@ required_files = (
     "CHANGELOG.md", "GITHUB_PUBLISHING.md", "home-assistant/README.md",
     ".github/workflows/ci.yml", ".github/releases/v1.0.0.md",
     ".github/releases/v1.1.0.md",
-    ".github/releases/v1.1.1.md",
+    ".github/releases/v1.1.1.md", ".github/releases/v1.1.2.md",
     "home-assistant/blueprints/automation/envpl/esp_rc01_remote_actions.yaml",
     "docs/images/README.md", "docs/images/ar01v3-main-page.png",
     "docs/images/flipper-import-page.png",
