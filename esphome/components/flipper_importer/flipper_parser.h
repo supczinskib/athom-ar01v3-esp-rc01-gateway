@@ -831,14 +831,17 @@ inline bool parse_ir_file(const std::string &text, ParsedSignal &signal, std::st
     }
     if (type == "parsed") {
       const auto proto_it = block.find("protocol");
-      if (proto_it != block.end() && lower_copy(proto_it->second) == "nec") {
-        selected = &block;
-        break;
+      if (proto_it != block.end()) {
+        const std::string protocol = lower_copy(proto_it->second);
+        if (protocol == "nec" || protocol == "necext") {
+          selected = &block;
+          break;
+        }
       }
     }
   }
   if (selected == nullptr) {
-    error = "Supported IR formats are raw and parsed NEC";
+    error = "Supported IR formats are raw and parsed NEC/NECext";
     return false;
   }
 
@@ -892,28 +895,46 @@ inline bool parse_ir_file(const std::string &text, ParsedSignal &signal, std::st
     const auto protocol_it = block.find("protocol");
     const auto address_it = block.find("address");
     const auto command_it = block.find("command");
-    if (protocol_it == block.end() || address_it == block.end() || command_it == block.end() ||
-        lower_copy(protocol_it->second) != "nec") {
-      error = "The supported parsed IR protocol is NEC";
+    if (protocol_it == block.end() || address_it == block.end() || command_it == block.end()) {
+      error = "Parsed NEC/NECext requires protocol, address and command";
+      return false;
+    }
+    const std::string protocol = lower_copy(protocol_it->second);
+    if (protocol != "nec" && protocol != "necext") {
+      error = "The supported parsed IR protocols are NEC and NECext";
       return false;
     }
     std::vector<uint8_t> address_bytes;
     std::vector<uint8_t> command_bytes;
     if (!parse_hex_bytes(address_it->second, address_bytes) || address_bytes.size() != 4 ||
         !parse_hex_bytes(command_it->second, command_bytes) || command_bytes.size() != 4) {
-      error = "NEC address and command must contain four bytes each";
+      error = "NEC/NECext address and command must contain four bytes each";
       return false;
     }
     const uint32_t address32 = little_endian_u32(address_bytes);
     const uint32_t command32 = little_endian_u32(command_bytes);
-    if (address32 > 0xFF || command32 > 0xFF) {
-      error = "Flipper NEC requires 8-bit address and command values";
-      return false;
+    uint16_t address = 0;
+    uint16_t command = 0;
+    if (protocol == "nec") {
+      if (address32 > 0xFF || command32 > 0xFF) {
+        error = "Flipper NEC requires 8-bit address and command values";
+        return false;
+      }
+      // Flipper stores the logical 8-bit values. A standard NEC frame transmits
+      // each value followed by its one's complement.
+      address = static_cast<uint16_t>(address32 | ((~address32 & 0xFFU) << 8U));
+      command = static_cast<uint16_t>(command32 | ((~command32 & 0xFFU) << 8U));
+    } else {
+      if (address32 > 0xFFFF || command32 > 0xFFFF) {
+        error = "Flipper NECext requires 16-bit address and command values";
+        return false;
+      }
+      // Flipper stores both 16-bit fields exactly as transmitted for NECext.
+      // Do not synthesize complements: doing so would change valid extended
+      // addresses and commands such as 00 EF / 02 FD.
+      address = static_cast<uint16_t>(address32);
+      command = static_cast<uint16_t>(command32);
     }
-    // Flipper stores the logical 8-bit values. A standard NEC frame transmits
-    // each value followed by its one's complement.
-    const uint16_t address = static_cast<uint16_t>(address32 | ((~address32 & 0xFFU) << 8U));
-    const uint16_t command = static_cast<uint16_t>(command32 | ((~command32 & 0xFFU) << 8U));
     signal.timings = build_nec_timings(address, command);
     signal.frequency = 38000;
     signal.duty_percent = 33;
@@ -921,7 +942,7 @@ inline bool parse_ir_file(const std::string &text, ParsedSignal &signal, std::st
     signal.bit_count = 32;
     signal.pulse_length = 560;
     signal.code = (static_cast<uint64_t>(address) << 16U) | command;
-    signal.source_format = "Flipper IR parsed NEC";
+    signal.source_format = protocol == "nec" ? "Flipper IR parsed NEC" : "Flipper IR parsed NECext";
   }
 
   return validate_signed_timings(signal.timings, error);

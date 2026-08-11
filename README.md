@@ -20,7 +20,7 @@ The AR01V3 is inexpensive, mains powered, network connected, and well suited to 
 
 Once a compatible signal file or definition is available, an installed gateway can be provisioned and tested over the network. There is no need to connect it by USB, rebuild the firmware, stand next to the AR01V3, or bring the original remote to its location. This is particularly useful for gateways mounted in remote, difficult-to-reach, or multiple locations.
 
-ESP-RC01 support adds a second role: inexpensive physical remotes can trigger Home Assistant actions through ESP-NOW or directly transmit a stored IR/RF command from the receiving AR01V3. The local assignment is stored in the gateway and does not require an active Home Assistant connection. For buttons routed to Home Assistant, several AR01V3 receivers can hear the same remote for wider coverage, while the supplied package removes duplicate receptions and emits one canonical event.
+ESP-RC01 support adds a second role: inexpensive physical remotes can trigger Home Assistant actions through ESP-NOW or directly transmit a stored IR/RF command from the receiving AR01V3. The local assignment is stored in the gateway and does not require an active Home Assistant connection. For buttons routed to Home Assistant, several AR01V3 receivers can hear the same remote for wider coverage, while the supplied package removes duplicate receptions and emits one pilot-specific event.
 
 Signals can enter the system in three ways: local learning, import of a supported file, or a direct Home Assistant action that does not use a slot. These are complementary input methods, not the main purpose of the project.
 
@@ -89,7 +89,7 @@ Every stored IR and RF slot is exposed as a normal Home Assistant button under t
 
 - IR reception on GPIO33 and transmission on GPIO25.
 - NEC-first learning with RAW fallback.
-- Parsed NEC and raw Flipper `.ir` files can be imported.
+- Parsed NEC, parsed NECext, and raw Flipper `.ir` files can be imported.
 - Learned, imported, stored, and directly supplied Home Assistant signals use the same transmitter path.
 
 ### Flipper-compatible import page
@@ -97,7 +97,7 @@ Every stored IR and RF slot is exposed as a normal Home Assistant button under t
 - Authenticated page at `http://DEVICE_ADDRESS/flipper`.
 - Styling integrated with the ESPHome Web Server v3 page.
 - RF support: Princeton, static 40-bit Dooya, and SubGhz RAW OOK at 433.92 MHz.
-- IR support: parsed NEC and raw timing files.
+- IR support: parsed NEC, parsed NECext, and raw timing files.
 - Live slot state, validation results, import, test transmission, capture status, and slot clearing on the page itself.
 - Neutral regression examples in [examples](examples/).
 
@@ -117,10 +117,11 @@ The embedded web interface uses HTTP Digest authentication but does not provide 
 - Persistent remote MAC pairing, 60-second pairing window, clearing, battery value, button name/code, packet sequence, hold events, and receiver identity.
 - Persistent assignments for all 16 supported button events of every paired remote.
 - Per-button choices: `Home Assistant`, `Ignore`, any IR slot `0..9`, or any RF slot `0..15`.
+- Ten separate `ESP-NOW Pilot N Button` event entities let Home Assistant distinguish identical buttons on different pilots in GUI automations.
 - A local IR/RF assignment is executed by the AR01V3 itself and continues to work without an active Home Assistant connection.
-- `Home Assistant` is the default for every assignment, preserving the original event and deduplication behavior after an upgrade.
+- `Home Assistant` is the default for every assignment and forwards the button to the pilot-specific HA event path.
 - Up to ten AR01V3 receivers may cover the same area. They do not retransmit packets; each receiver reports what it heard.
-- The supplied Home Assistant package accepts the first copy and discards duplicates received by other AR01V3 units, then emits one canonical `esp_rc01_button` event.
+- The supplied Home Assistant package accepts the first copy, discards duplicates received by other AR01V3 units, and emits only the matching `esp_rc01_pilot_N_button` event.
 
 ### Home Assistant control
 
@@ -366,7 +367,7 @@ Importing into an occupied slot replaces its previous record. Keep original sign
 
 The primary device appears as **Athom RF IR Remote**. Home Assistant may show **AR01V3 Stored Signal Actions** as a second sub-device. This is intentional: the second device contains the 26 GUI buttons designed for virtual devices, scripts, scenes, and automations.
 
-If those buttons do not appear after a firmware update, reload the ESPHome integration or restart Home Assistant. Confirm that the device reports project version `1.1.0`.
+If those buttons do not appear after a firmware update, reload the ESPHome integration or restart Home Assistant. Confirm that the device reports project version `1.1.1`.
 
 ### Use a stored slot in the GUI
 
@@ -467,7 +468,7 @@ First store and test the required command in an IR or RF slot. Then open the aut
 4. Confirm the resulting mapping in the **Assignment** row.
 5. Press the physical button and verify the target device reacts.
 
-The mapping is saved automatically and survives a normal reboot or firmware update. A local slot action is executed entirely by the AR01V3, so it still works when Home Assistant is offline. RF actions use the current **RF Repeat Count** and **RF Repeat Gap** settings. `Home Assistant` keeps the original event path, while `Ignore` performs no transmission and emits no Home Assistant event.
+The mapping is saved automatically and survives a normal reboot or firmware update. A local slot action is executed entirely by the AR01V3, so it still works when Home Assistant is offline. RF actions use the current **RF Repeat Count** and **RF Repeat Gap** settings. `Home Assistant` forwards the button to the pilot-specific event path, while `Ignore` performs no transmission and emits no Home Assistant event.
 
 Assignments are stored independently on each receiver. If several AR01V3 units hear the same remote, configure the local action only on the unit that should transmit it; otherwise multiple receivers can execute the same command. Home Assistant deduplication applies only to buttons routed to Home Assistant, not to autonomous local transmissions.
 
@@ -486,24 +487,33 @@ For Home Assistant OS, copy one of the following manually with Studio Code Serve
 - use `home-assistant/esp_rc01_10x10_package.yaml` with `packages: !include_dir_named packages`;
 - use `home-assistant/esp_rc01_10x10_package_merge_named.yaml` with `packages: !include_dir_merge_named packages`.
 
-Install only one variant, check the Home Assistant configuration, and restart Home Assistant. The package automation may be visible as read-only in the UI because it is defined in a package rather than `automations.yaml`; that is expected. Create your own user automations in the GUI and trigger them from the canonical event.
+Install only one variant, check the Home Assistant configuration, and restart Home Assistant. The package automation may be visible as read-only in the UI because it is defined in a package rather than `automations.yaml`; that is expected. Create your own user automations in the GUI and trigger them from the required pilot-specific event.
 
 ### Create a remote-button automation in the GUI
 
+For a single AR01V3 receiver, choose the required `ESP-NOW Pilot N Button` event entity as the trigger and select its event type, such as `on`, `off`, or `p1`. Because every pilot has a separate entity, no pilot-number template or YAML filter is required.
+
+When several AR01V3 receivers hear the same pilot, use the installed deduplication package and an **Event** trigger. Set its event type to the pilot-specific name, for example `esp_rc01_pilot_1_button`, and set event data to the required button:
+
+```yaml
+button: "on"
+```
+
+The package emits `esp_rc01_pilot_1_button` through `esp_rc01_pilot_10_button`. For example, Pilot 1 and Pilot 2 use different event types even when both physical buttons are named `on`:
+
 1. Open **Settings → Automations & scenes → Create automation**.
 2. Add trigger **Event**.
-3. Set event type to `esp_rc01_button`.
-4. In event data, use a logical remote and button, for example:
+3. Set event type to `esp_rc01_pilot_1_button`.
+4. In event data, select the button, for example:
 
    ```yaml
-   remote_slot: 1
    button: "on"
    ```
 
 5. Add any GUI action: activate a scene, run a script, press a stored-slot button, or control a normal Home Assistant entity.
 6. Save and test it.
 
-The canonical event also includes `sequence`, `button_code`, `battery`, `remote_mac`, and `receiver`. See `home-assistant/automation_examples.yaml` for optional examples.
+The pilot-specific event also includes `sequence`, `button_code`, `battery`, `remote_mac`, and `receiver`. See `home-assistant/automation_examples.yaml` for optional examples.
 
 ## Signal record behavior
 
@@ -548,14 +558,14 @@ The canonical event also includes `sequence`, `button_code`, `battery`, `remote_
 
 ### Imported IR is slow or unreliable
 
-- Prefer parsed NEC when the original protocol is NEC.
+- Prefer parsed NEC or NECext when the original protocol matches it.
 - Keep RAW captures to one clean command and use the correct carrier and duty cycle.
 - Avoid excessive repeats and unnecessary gaps.
 - Position the AR01V3 IR emitters with a clear line of sight to the appliance.
 
 ### Home Assistant action search is empty
 
-- Confirm the ESPHome integration is connected and the receiver runs version `1.1.0`.
+- Confirm the ESPHome integration is connected and the receiver runs version `1.1.1`.
 - Reload the ESPHome integration or restart Home Assistant after a firmware upgrade that adds actions.
 - For stored signals, search for **Button: Press** and select a `Send IR Slot N` or `Send RF Slot N` entity. Do not search for the preview sensor.
 - Direct actions begin with `esphome.<node_name>_transmit_...`.
@@ -578,7 +588,7 @@ Run `scripts/00_self_test.sh` afterward. Do not edit `flipper_page.h` by hand.
 - Third-party provenance: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 - Security reports: [SECURITY.md](SECURITY.md).
 - Contribution rules: [CONTRIBUTING.md](CONTRIBUTING.md).
-- Prepared GitHub repository metadata and release text: [GITHUB_PUBLISHING.md](GITHUB_PUBLISHING.md) and [.github/releases/v1.1.0.md](.github/releases/v1.1.0.md).
+- Prepared GitHub repository metadata and release text: [GITHUB_PUBLISHING.md](GITHUB_PUBLISHING.md) and [.github/releases/v1.1.1.md](.github/releases/v1.1.1.md).
 
 Parts of the hardware configuration and storage component originate from Athom's public ESPHome configuration repository. Athom retains all rights to its original work. Project-specific additions are provided under `GPL-3.0-only`; the detailed attribution and licensing status of upstream material are recorded separately in `THIRD_PARTY_NOTICES.md`.
 

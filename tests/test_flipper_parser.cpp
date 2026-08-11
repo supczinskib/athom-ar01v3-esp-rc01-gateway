@@ -314,6 +314,46 @@ int main(int argc, char **argv) {
     require(ir_decoded.kind == SignalKind::IR && ir_decoded.timings == ir.timings,
             "IR record: decoded data differs from input");
 
+    const std::string ir_necext =
+        "Filetype: IR signals file\nVersion: 1\n#\nname: On\ntype: parsed\n"
+        "protocol: NECext\naddress: 00 EF 00 00\ncommand: 02 FD 00 00\n";
+    ParsedSignal ir_necext_signal;
+    error.clear();
+    require(parse_flipper_file(ir_necext, ir_necext_signal, error),
+            "IR NECext parse: " + error);
+    require(ir_necext_signal.kind == SignalKind::IR &&
+                ir_necext_signal.encoding == SignalEncoding::NEC,
+            "IR NECext: wrong signal kind or encoding");
+    require(ir_necext_signal.source_format == "Flipper IR parsed NECext",
+            "IR NECext: wrong source format");
+    require(ir_necext_signal.code == 0xEF00FD02ULL,
+            "IR NECext: address or command was changed");
+    require(ir_necext_signal.frequency == 38000U && ir_necext_signal.duty_percent == 33U,
+            "IR NECext: wrong carrier configuration");
+    require(ir_necext_signal.timings.size() == 67U,
+            "IR NECext: expected 67 timings");
+    // Address 00 EF and command 02 FD are transmitted LSB first without
+    // synthesizing the standard NEC address complement.
+    require(ir_necext_signal.timings[2] == 560 && ir_necext_signal.timings[3] == -560,
+            "IR NECext: address bit 0");
+    require(ir_necext_signal.timings[18] == 560 && ir_necext_signal.timings[19] == -1690,
+            "IR NECext: extended address bit 8");
+    require(ir_necext_signal.timings[26] == 560 && ir_necext_signal.timings[27] == -560,
+            "IR NECext: extended address bit 12");
+    require(ir_necext_signal.timings[command_start] == 560 &&
+                ir_necext_signal.timings[command_start + 1] == -560 &&
+                ir_necext_signal.timings[command_start + 2] == 560 &&
+                ir_necext_signal.timings[command_start + 3] == -1690,
+            "IR NECext: command prefix");
+    const auto ir_necext_record = encode_record(ir_necext_signal);
+    StoredSignal ir_necext_decoded;
+    error.clear();
+    require(decode_record(ir_necext_record, ir_necext_decoded, &error),
+            "IR NECext record: " + error);
+    require(ir_necext_decoded.code == ir_necext_signal.code &&
+                ir_necext_decoded.timings == ir_necext_signal.timings,
+            "IR NECext record: decoded data differs from input");
+
     // Minimal tests for raw formats supported by the importer.
     const std::string ir_raw =
         "Filetype: IR signals file\nVersion: 1\n#\nname: raw_test\ntype: raw\n"
@@ -337,6 +377,7 @@ int main(int argc, char **argv) {
     std::cout << "OK: Princeton example parser\n";
     std::cout << "OK: Dooya example parser\n";
     std::cout << "OK: NEC example parser\n";
+    std::cout << "OK: NECext parser\n";
     std::cout << "OK: int32 NVS record and RAW formats\n";
     return 0;
   } catch (const std::exception &error) {

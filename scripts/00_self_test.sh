@@ -67,7 +67,7 @@ errors: list[str] = []
 
 required_base = (
     'project_name: "envpl.ar01v3_esp_rc01_gateway"',
-    'project_version: "1.1.0"',
+    'project_version: "1.1.1"',
     'type: digest',
     'username: !secret web_server_username',
     'password: !secret web_server_password',
@@ -100,6 +100,8 @@ required_base = (
     'name: "Assignment"',
     'return id(remote_action_ui_ready) && !id(remote_action_ui_syncing);',
     'id(remote_dispatch_to_ha) = action == 0U',
+    'id(espnow_pilot_1_button_event).trigger(button_name)',
+    'id(espnow_pilot_10_button_event).trigger(button_name)',
     'id(flipper_web_importer).send_ir_slot(slot)',
     'id(flipper_web_importer).send_rf_slot(slot, repeats, gap_ms * 1000U)',
     'on_client_connected:\n    - delay: 10s',
@@ -125,10 +127,36 @@ for prefix, count in (("IR", 10), ("RF", 16)):
         if f'name: "{prefix} Slot {slot}"' not in text:
             errors.append(f"missing slot preview: {prefix} Slot {slot}")
 
+for pilot in range(1, 11):
+    if f'name: "ESP-NOW Pilot {pilot} Button"' not in text:
+        errors.append(f"missing per-pilot Home Assistant event entity: Pilot {pilot}")
+    if f'id: espnow_pilot_{pilot}_button_event' not in text:
+        errors.append(f"missing per-pilot event ID: Pilot {pilot}")
+    for base_weight, marker in (
+        (100, f'id: remote_battery_{pilot}'),
+        (200, f'id: remote_paired_text_{pilot}'),
+        (300, f'id: espnow_pilot_{pilot}_button_event'),
+    ):
+        block = text.split(marker, 1)[1].split("\n  - platform:", 1)[0]
+        if f"sorting_weight: {base_weight + pilot}" not in block:
+            errors.append(f"missing numeric web ordering after {marker}")
+
+for package_name in (
+    "esp_rc01_10x10_package.yaml",
+    "esp_rc01_10x10_package_merge_named.yaml",
+):
+    package_text = (root / "home-assistant" / package_name).read_text(encoding="utf-8")
+    if "esp_rc01_pilot_" not in package_text or "_button' }}" not in package_text:
+        errors.append(f"missing pilot-specific deduplicated event in {package_name}")
+    if "esp_rc01_button" in package_text:
+        errors.append(f"obsolete shared ESP-RC01 event remains in {package_name}")
+
 if "timings: int[]" in text:
     errors.append("unsupported API variable type timings: int[] is present")
 if text.count("on_raw:") != 1:
     errors.append("RF on_raw must be absent and the single IR on_raw handler must remain")
+if 'name: "ESP-NOW Remote Raw"' in text or "espnow_remote_raw_event" in text:
+    errors.append("obsolete shared ESP-NOW event entity is still present")
 
 component = root / "esphome" / "components" / "flipper_importer"
 for name in (
@@ -216,6 +244,7 @@ required_files = (
     "CHANGELOG.md", "GITHUB_PUBLISHING.md", "home-assistant/README.md",
     ".github/workflows/ci.yml", ".github/releases/v1.0.0.md",
     ".github/releases/v1.1.0.md",
+    ".github/releases/v1.1.1.md",
     "docs/images/README.md", "docs/images/ar01v3-main-page.png",
     "docs/images/flipper-import-page.png",
     "docs/images/home-assistant-stored-actions.png", ".gitignore",
@@ -235,7 +264,7 @@ if publication_mode and (root / "esphome" / "secrets.yaml").exists():
 
 private_markers = (
     "HOME IOT", "/Users/", "/root/", "LED POWER", "SCREEN UP",
-    "YAMAHA ON", "bartoszsupcinski", "ChatGPT", "OpenAI", "Claude", "Codex",
+    "YAMAHA ON", "bartoszsupcinski",
 )
 for path in root.rglob("*"):
     if (not path.is_file() or path.name == "LICENSE" or

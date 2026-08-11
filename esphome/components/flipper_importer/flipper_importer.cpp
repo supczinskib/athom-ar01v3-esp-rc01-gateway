@@ -23,7 +23,7 @@ void FlipperImporter::setup() {
 void FlipperImporter::dump_config() {
   ESP_LOGCONFIG(TAG, "Flipper file importer:");
   ESP_LOGCONFIG(TAG, "  Page: /flipper");
-  ESP_LOGCONFIG(TAG, "  IR: NEC parsed and raw");
+  ESP_LOGCONFIG(TAG, "  IR: NEC/NECext parsed and raw");
   ESP_LOGCONFIG(TAG, "  RF: Princeton, Dooya and RAW OOK/ASK 433.92 MHz");
 }
 

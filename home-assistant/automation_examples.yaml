@@ -1,43 +1,41 @@
-# Examples use the already deduplicated `esp_rc01_button` event.
+# Examples use the already deduplicated pilot-specific events.
 # Replace entity IDs and paste selected automations into automations.yaml or create them in the UI.
 
 - id: esp_rc01_pilot_1_on_example
   alias: "ESP-RC01 Pilot 1 ON - example"
   triggers:
     - trigger: event
-      event_type: esp_rc01_button
+      event_type: esp_rc01_pilot_1_button
       event_data:
-        remote_slot: 1
         button: "on"
   actions:
-    - action: light.turn_on
+    - action: light.toggle
       target:
         entity_id: light.REPLACE_ME
+  mode: single
+
+- id: esp_rc01_pilot_2_on_example
+  alias: "ESP-RC01 Pilot 2 ON - example"
+  triggers:
+    - trigger: event
+      event_type: esp_rc01_pilot_2_button
+      event_data:
+        button: "on"
+  actions:
+    - action: script.turn_on
+      target:
+        entity_id: script.REPLACE_ME
   mode: single
 
 - id: esp_rc01_pilot_1_off_example
   alias: "ESP-RC01 Pilot 1 OFF - example"
   triggers:
     - trigger: event
-      event_type: esp_rc01_button
+      event_type: esp_rc01_pilot_1_button
       event_data:
-        remote_slot: 1
         button: "off"
   actions:
     - action: light.turn_off
       target:
         entity_id: light.REPLACE_ME
-  mode: single
-
-- id: esp_rc01_any_pilot_p1_example
-  alias: "ESP-RC01 Any Pilot P1 - example"
-  triggers:
-    - trigger: event
-      event_type: esp_rc01_button
-      event_data:
-        button: "p1"
-  actions:
-    - action: script.turn_on
-      target:
-        entity_id: script.REPLACE_ME
   mode: single

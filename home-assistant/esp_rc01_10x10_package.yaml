@@ -1,6 +1,7 @@
 # Home Assistant package for 10 ESP-RC01 pilots and 10 AR01V3 receivers.
-# Receives raw events from every AR01V3 and emits exactly one canonical event:
-#   esp_rc01_button
+# Receives raw events from every AR01V3 and emits one pilot-specific event
+# after deduplication:
+#   esp_rc01_pilot_N_button
 
 input_text:
   esp_rc01_pilot_1_recent_packets:
@@ -126,9 +127,8 @@ automation:
           entity_id: "{{ timer_entity }}"
         data:
           duration: "00:00:02"
-      - event: esp_rc01_button
+      - event: "{{ 'esp_rc01_pilot_' ~ remote_slot ~ '_button' }}"
         event_data:
-          remote_slot: "{{ remote_slot }}"
           sequence: "{{ sequence }}"
           button_code: "{{ button_code }}"
           button: "{{ button }}"

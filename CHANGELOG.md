@@ -2,6 +2,14 @@
 
 All notable project changes are documented here.
 
+## 1.1.1 — 2026-08-10
+
+- Added parsed Flipper `NECext` IR import with exact 16-bit address and command preservation.
+- Added one Home Assistant event entity for each of the ten ESP-RC01 pilot slots, allowing identical buttons on different pilots to trigger different GUI automations.
+- Added deduplicated pilot-specific events `esp_rc01_pilot_1_button` through `esp_rc01_pilot_10_button`.
+- Removed the shared `ESP-NOW Remote Raw` entity and `esp_rc01_button` output; version 1.1.1 requires the supplied pilot-specific deduplication package.
+- Applied explicit numerical web-interface ordering to pilot battery, pairing, and button-event rows so Pilot 10 follows Pilot 9.
+
 ## 1.1.0 — 2026-08-08
 
 - Added persistent per-receiver assignments for all ten ESP-RC01 pilots and sixteen supported button events.

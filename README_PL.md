@@ -89,7 +89,7 @@ Każdy zapisany slot IR i RF jest dostępny jako zwykły przycisk Home Assistant
 
 - Odbiór na GPIO33 i nadawanie na GPIO25.
 - Nauka najpierw próbuje rozpoznać NEC, a następnie korzysta z RAW.
-- Import plików `.ir` w formacie parsed NEC i raw.
+- Import plików `.ir` w formacie parsed NEC, parsed NECext i raw.
 - Sygnały nauczone, zaimportowane, zapisane w slotach i przekazane bezpośrednio z HA korzystają z tej samej ścieżki nadawczej.
 
 ### Import z Flippera
@@ -97,7 +97,7 @@ Każdy zapisany slot IR i RF jest dostępny jako zwykły przycisk Home Assistant
 - Chroniona hasłem strona `http://ADRES_URZĄDZENIA/flipper`.
 - Wygląd spójny ze stroną ESPHome Web Server v3.
 - RF: Princeton, statyczny 40-bitowy Dooya i SubGhz RAW OOK przy 433,92 MHz.
-- IR: parsed NEC i raw timings.
+- IR: parsed NEC, parsed NECext i raw timings.
 - Status online, walidacja, import, transmisja testowa, stan przechwytywania i czyszczenie slotu bez przechodzenia do osobnego JSON-a.
 - Neutralne pliki testowe w katalogu [examples](examples/).
 
@@ -117,10 +117,11 @@ Wbudowany interfejs WWW korzysta z uwierzytelniania HTTP Digest, ale nie zapewni
 - Trwałe zapisywanie MAC, 60-sekundowe okno parowania, kasowanie pary, bateria, nazwa i kod przycisku, numer sekwencji, zdarzenia przytrzymania i identyfikator odbiornika.
 - Trwałe przypisania wszystkich 16 obsługiwanych zdarzeń przycisków każdego sparowanego pilota.
 - Dla każdego przycisku można wybrać `Home Assistant`, `Ignore`, dowolny slot IR `0..9` albo dowolny slot RF `0..15`.
+- Dziesięć osobnych encji zdarzeń `ESP-NOW Pilot N Button` pozwala rozróżnić w automatyzacjach GUI te same przyciski na różnych pilotach.
 - Lokalne przypisanie IR/RF wykonuje sam AR01V3 i działa bez aktywnego połączenia z Home Assistant.
-- Domyślną akcją każdego przycisku jest `Home Assistant`, dzięki czemu aktualizacja zachowuje dotychczasowe zdarzenia i deduplikację.
+- Domyślną akcją każdego przycisku jest `Home Assistant`, która przekazuje go do zdarzenia właściwego dla danego pilota.
 - Maksymalnie dziesięć AR01V3 może pokrywać ten sam obszar. Nie jest to mesh z retransmisją — każdy odbiornik zgłasza bezpośrednio odebraną kopię.
-- Pakiet Home Assistant przyjmuje pierwszą kopię, odrzuca duplikaty z pozostałych odbiorników i generuje jedno zdarzenie `esp_rc01_button`.
+- Pakiet Home Assistant przyjmuje pierwszą kopię, odrzuca duplikaty z pozostałych odbiorników i generuje wyłącznie właściwe zdarzenie `esp_rc01_pilot_N_button`.
 
 ### Home Assistant
 
@@ -360,7 +361,7 @@ Import do zajętego slotu zastępuje poprzedni rekord. Oryginalne pliki warto za
 
 Główne urządzenie jest widoczne jako **Athom RF IR Remote**. Home Assistant może osobno pokazać **AR01V3 Stored Signal Actions**. To celowe podurządzenie z 26 przyciskami przygotowanymi do użycia w wirtualnych urządzeniach, skryptach, scenach i automatyzacjach.
 
-Jeżeli po aktualizacji firmware przycisków nie widać, przeładuj integrację ESPHome lub uruchom ponownie Home Assistant i sprawdź wersję projektu `1.1.0`.
+Jeżeli po aktualizacji firmware przycisków nie widać, przeładuj integrację ESPHome lub uruchom ponownie Home Assistant i sprawdź wersję projektu `1.1.1`.
 
 ### Wywołanie zapisanego slotu w GUI
 
@@ -461,7 +462,7 @@ Najpierw zapisz i przetestuj potrzebne polecenie w slocie IR albo RF. Następnie
 4. Sprawdź gotowe mapowanie w wierszu **Assignment**.
 5. Naciśnij fizyczny przycisk i sprawdź reakcję sterowanego urządzenia.
 
-Przypisanie zapisuje się automatycznie i pozostaje po zwykłym restarcie oraz aktualizacji firmware. Lokalna akcja slotu jest wykonywana w całości przez AR01V3, dlatego działa również wtedy, gdy Home Assistant jest niedostępny. Akcje RF korzystają z bieżących ustawień **RF Repeat Count** i **RF Repeat Gap**. `Home Assistant` zachowuje dotychczasową ścieżkę zdarzeń, a `Ignore` nie nadaje sygnału i nie generuje zdarzenia HA.
+Przypisanie zapisuje się automatycznie i pozostaje po zwykłym restarcie oraz aktualizacji firmware. Lokalna akcja slotu jest wykonywana w całości przez AR01V3, dlatego działa również wtedy, gdy Home Assistant jest niedostępny. Akcje RF korzystają z bieżących ustawień **RF Repeat Count** i **RF Repeat Gap**. `Home Assistant` przekazuje przycisk do zdarzenia właściwego dla danego pilota, a `Ignore` nie nadaje sygnału i nie generuje zdarzenia HA.
 
 Każdy odbiornik przechowuje własne przypisania. Jeżeli kilka AR01V3 słyszy ten sam pilot, lokalną akcję należy ustawić tylko na urządzeniu, które ma ją wykonać; w przeciwnym razie kilka odbiorników może nadać to samo polecenie. Deduplikacja Home Assistant dotyczy wyłącznie przycisków przekazywanych do HA, a nie autonomicznych transmisji lokalnych.
 
@@ -484,20 +485,29 @@ Zainstaluj tylko jeden wariant, sprawdź konfigurację i zrestartuj Home Assista
 
 ### Automatyzacja przycisku pilota w GUI
 
+Przy jednym odbiorniku AR01V3 wybierz jako wyzwalacz właściwą encję zdarzeń `ESP-NOW Pilot N Button`, a następnie typ zdarzenia, np. `on`, `off` albo `p1`. Każdy pilot ma osobną encję, dlatego nie jest potrzebny filtr numeru pilota ani szablon YAML.
+
+Jeżeli ten sam pilot jest odbierany przez kilka AR01V3, użyj zainstalowanego pakietu deduplikującego i wyzwalacza **Zdarzenie**. Jako typ wpisz nazwę konkretnego pilota, np. `esp_rc01_pilot_1_button`, a w danych zdarzenia podaj przycisk:
+
+```yaml
+button: "on"
+```
+
+Pakiet generuje zdarzenia od `esp_rc01_pilot_1_button` do `esp_rc01_pilot_10_button`. Pilot 1 i Pilot 2 mają więc różne typy zdarzeń nawet wtedy, gdy na obu naciśnięto przycisk `on`:
+
 1. Otwórz **Ustawienia → Automatyzacje i sceny → Utwórz automatyzację**.
 2. Dodaj wyzwalacz **Zdarzenie**.
-3. Typ zdarzenia: `esp_rc01_button`.
-4. Dane zdarzenia mogą wyglądać tak:
+3. Typ zdarzenia: `esp_rc01_pilot_1_button`.
+4. W danych zdarzenia wybierz przycisk, np.:
 
    ```yaml
-   remote_slot: 1
    button: "on"
    ```
 
 5. Dodaj dowolną akcję z GUI: aktywację sceny, uruchomienie skryptu, naciśnięcie przycisku slotu albo sterowanie zwykłą encją.
 6. Zapisz i przetestuj.
 
-Zdarzenie zawiera również `sequence`, `button_code`, `battery`, `remote_mac` i `receiver`. Dodatkowe przykłady są w `home-assistant/automation_examples.yaml`.
+Zdarzenie pilota zawiera również `sequence`, `button_code`, `battery`, `remote_mac` i `receiver`. Dodatkowe przykłady są w `home-assistant/automation_examples.yaml`.
 
 ## Sposób zapisu sygnałów
 
@@ -541,7 +551,7 @@ Zdarzenie zawiera również `sequence`, `button_code`, `battery`, `remote_mac` i
 
 ### Akcji nie widać w HA
 
-- Sprawdź połączenie integracji ESPHome i wersję projektu `1.1.0`.
+- Sprawdź połączenie integracji ESPHome i wersję projektu `1.1.1`.
 - Po aktualizacji firmware przeładuj integrację ESPHome lub zrestartuj HA.
 - Dla slotów wybierz akcję **Przycisk: Naciśnij** i encję `Send IR Slot N` albo `Send RF Slot N`; sensor podglądu nie nadaje.
 - Akcje bezpośrednie zaczynają się od `esphome.<nazwa_węzła>_transmit_...`.
@@ -564,7 +574,7 @@ Następnie trzeba uruchomić `scripts/00_self_test.sh`. Pliku `flipper_page.h` n
 - Pochodzenie elementów zewnętrznych: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 - Zgłaszanie problemów bezpieczeństwa: [SECURITY.md](SECURITY.md).
 - Zasady współtworzenia: [CONTRIBUTING.md](CONTRIBUTING.md).
-- Przygotowane metadane repozytorium i opis wydania GitHub: [GITHUB_PUBLISHING.md](GITHUB_PUBLISHING.md) oraz [.github/releases/v1.1.0.md](.github/releases/v1.1.0.md).
+- Przygotowane metadane repozytorium i opis wydania GitHub: [GITHUB_PUBLISHING.md](GITHUB_PUBLISHING.md) oraz [.github/releases/v1.1.1.md](.github/releases/v1.1.1.md).
 
 Część konfiguracji sprzętowej i komponentu pamięci pochodzi z publicznego repozytorium konfiguracji ESPHome firmy Athom. Athom zachowuje prawa do swojej oryginalnej pracy. Dodatki specyficzne dla tego projektu są udostępniane na licencji `GPL-3.0-only`, a szczegółowe informacje o pochodzeniu i statusie elementów zewnętrznych znajdują się w `THIRD_PARTY_NOTICES.md`.
 

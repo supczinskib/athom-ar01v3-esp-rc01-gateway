@@ -10,7 +10,7 @@ substitutions:
   # Project Name
   project_name: "envpl.ar01v3_esp_rc01_gateway"
   # Projection version denotes the release version of the yaml file, allowing checking of deployed vs latest version
-  project_version: "1.1.0"
+  project_version: "1.1.1"
   # Stable identifier included in events sent to Home Assistant
   receiver_id: "ar01v3_1"
   # Define a domain for this device to use. i.e. iot.home.lan (so device will appear as athom-smart-plug-v2.iot.home.lan in DNS/DHCP logs)
@@ -1267,6 +1267,7 @@ sensor:
     update_interval: never
     device_class: battery
     entity_category: diagnostic
+    web_server: {sorting_weight: 101}
 
   - platform: template
     name: "ESP-NOW Pilot 2 Battery"
@@ -1276,6 +1277,7 @@ sensor:
     update_interval: never
     device_class: battery
     entity_category: diagnostic
+    web_server: {sorting_weight: 102}
 
   - platform: template
     name: "ESP-NOW Pilot 3 Battery"
@@ -1285,6 +1287,7 @@ sensor:
     update_interval: never
     device_class: battery
     entity_category: diagnostic
+    web_server: {sorting_weight: 103}
 
   - platform: template
     name: "ESP-NOW Pilot 4 Battery"
@@ -1294,6 +1297,7 @@ sensor:
     update_interval: never
     device_class: battery
     entity_category: diagnostic
+    web_server: {sorting_weight: 104}
 
   - platform: template
     name: "ESP-NOW Pilot 5 Battery"
@@ -1303,6 +1307,7 @@ sensor:
     update_interval: never
     device_class: battery
     entity_category: diagnostic
+    web_server: {sorting_weight: 105}
 
   - platform: template
     name: "ESP-NOW Pilot 6 Battery"
@@ -1312,6 +1317,7 @@ sensor:
     update_interval: never
     device_class: battery
     entity_category: diagnostic
+    web_server: {sorting_weight: 106}
 
   - platform: template
     name: "ESP-NOW Pilot 7 Battery"
@@ -1321,6 +1327,7 @@ sensor:
     update_interval: never
     device_class: battery
     entity_category: diagnostic
+    web_server: {sorting_weight: 107}
 
   - platform: template
     name: "ESP-NOW Pilot 8 Battery"
@@ -1330,6 +1337,7 @@ sensor:
     update_interval: never
     device_class: battery
     entity_category: diagnostic
+    web_server: {sorting_weight: 108}
 
   - platform: template
     name: "ESP-NOW Pilot 9 Battery"
@@ -1339,6 +1347,7 @@ sensor:
     update_interval: never
     device_class: battery
     entity_category: diagnostic
+    web_server: {sorting_weight: 109}
 
   - platform: template
     name: "ESP-NOW Pilot 10 Battery"
@@ -1348,6 +1357,7 @@ sensor:
     update_interval: never
     device_class: battery
     entity_category: diagnostic
+    web_server: {sorting_weight: 110}
   - platform: template
     name: "ESP-NOW Last Button Code"
     id: remote_button_code_sensor
@@ -1867,14 +1877,15 @@ light:
     pin: ${LED_PIN}
 
 event:
-  # Raw per-receiver event. Use the HA event `esp_rc01_button` for automations,
-  # because that one has already been deduplicated across all AR01V3 receivers.
+  # Individual entities allow Home Assistant to distinguish the same button
+  # pressed on different paired pilots in the graphical automation editor.
   - platform: template
-    name: "ESP-NOW Remote Raw"
-    id: espnow_remote_raw_event
-    icon: mdi:remote
+    name: "ESP-NOW Pilot 1 Button"
+    id: espnow_pilot_1_button_event
+    icon: mdi:gesture-tap-button
     device_class: button
-    event_types:
+    web_server: {sorting_weight: 301}
+    event_types: &espnow_button_event_types
       - "on"
       - "off"
       - night
@@ -1892,6 +1903,78 @@ event:
       - brightness_up_hold
       - brightness_down_hold
       - unknown
+
+  - platform: template
+    name: "ESP-NOW Pilot 2 Button"
+    id: espnow_pilot_2_button_event
+    icon: mdi:gesture-tap-button
+    device_class: button
+    web_server: {sorting_weight: 302}
+    event_types: *espnow_button_event_types
+
+  - platform: template
+    name: "ESP-NOW Pilot 3 Button"
+    id: espnow_pilot_3_button_event
+    icon: mdi:gesture-tap-button
+    device_class: button
+    web_server: {sorting_weight: 303}
+    event_types: *espnow_button_event_types
+
+  - platform: template
+    name: "ESP-NOW Pilot 4 Button"
+    id: espnow_pilot_4_button_event
+    icon: mdi:gesture-tap-button
+    device_class: button
+    web_server: {sorting_weight: 304}
+    event_types: *espnow_button_event_types
+
+  - platform: template
+    name: "ESP-NOW Pilot 5 Button"
+    id: espnow_pilot_5_button_event
+    icon: mdi:gesture-tap-button
+    device_class: button
+    web_server: {sorting_weight: 305}
+    event_types: *espnow_button_event_types
+
+  - platform: template
+    name: "ESP-NOW Pilot 6 Button"
+    id: espnow_pilot_6_button_event
+    icon: mdi:gesture-tap-button
+    device_class: button
+    web_server: {sorting_weight: 306}
+    event_types: *espnow_button_event_types
+
+  - platform: template
+    name: "ESP-NOW Pilot 7 Button"
+    id: espnow_pilot_7_button_event
+    icon: mdi:gesture-tap-button
+    device_class: button
+    web_server: {sorting_weight: 307}
+    event_types: *espnow_button_event_types
+
+  - platform: template
+    name: "ESP-NOW Pilot 8 Button"
+    id: espnow_pilot_8_button_event
+    icon: mdi:gesture-tap-button
+    device_class: button
+    web_server: {sorting_weight: 308}
+    event_types: *espnow_button_event_types
+
+  - platform: template
+    name: "ESP-NOW Pilot 9 Button"
+    id: espnow_pilot_9_button_event
+    icon: mdi:gesture-tap-button
+    device_class: button
+    web_server: {sorting_weight: 309}
+    event_types: *espnow_button_event_types
+
+  - platform: template
+    name: "ESP-NOW Pilot 10 Button"
+    id: espnow_pilot_10_button_event
+    icon: mdi:gesture-tap-button
+    device_class: button
+    web_server: {sorting_weight: 310}
+    event_types: *espnow_button_event_types
 
 text_sensor:
   - platform: wifi_info
@@ -2107,60 +2190,70 @@ text_sensor:
     id: remote_paired_text_1
     icon: mdi:remote
     entity_category: diagnostic
+    web_server: {sorting_weight: 201}
 
   - platform: template
     name: "Paired ESP-NOW Pilot 2"
     id: remote_paired_text_2
     icon: mdi:remote
     entity_category: diagnostic
+    web_server: {sorting_weight: 202}
 
   - platform: template
     name: "Paired ESP-NOW Pilot 3"
     id: remote_paired_text_3
     icon: mdi:remote
     entity_category: diagnostic
+    web_server: {sorting_weight: 203}
 
   - platform: template
     name: "Paired ESP-NOW Pilot 4"
     id: remote_paired_text_4
     icon: mdi:remote
     entity_category: diagnostic
+    web_server: {sorting_weight: 204}
 
   - platform: template
     name: "Paired ESP-NOW Pilot 5"
     id: remote_paired_text_5
     icon: mdi:remote
     entity_category: diagnostic
+    web_server: {sorting_weight: 205}
 
   - platform: template
     name: "Paired ESP-NOW Pilot 6"
     id: remote_paired_text_6
     icon: mdi:remote
     entity_category: diagnostic
+    web_server: {sorting_weight: 206}
 
   - platform: template
     name: "Paired ESP-NOW Pilot 7"
     id: remote_paired_text_7
     icon: mdi:remote
     entity_category: diagnostic
+    web_server: {sorting_weight: 207}
 
   - platform: template
     name: "Paired ESP-NOW Pilot 8"
     id: remote_paired_text_8
     icon: mdi:remote
     entity_category: diagnostic
+    web_server: {sorting_weight: 208}
 
   - platform: template
     name: "Paired ESP-NOW Pilot 9"
     id: remote_paired_text_9
     icon: mdi:remote
     entity_category: diagnostic
+    web_server: {sorting_weight: 209}
 
   - platform: template
     name: "Paired ESP-NOW Pilot 10"
     id: remote_paired_text_10
     icon: mdi:remote
     entity_category: diagnostic
+    web_server: {sorting_weight: 210}
   - platform: template
     name: "Last ESP-NOW Remote MAC"
     id: remote_last_seen
@@ -2730,7 +2823,16 @@ script:
           id(remote_dispatch_to_ha) = action == 0U;
 
           if (action == 0U) {
-            id(espnow_remote_raw_event).trigger(button_name);
+            if (remote_slot == 1) id(espnow_pilot_1_button_event).trigger(button_name);
+            else if (remote_slot == 2) id(espnow_pilot_2_button_event).trigger(button_name);
+            else if (remote_slot == 3) id(espnow_pilot_3_button_event).trigger(button_name);
+            else if (remote_slot == 4) id(espnow_pilot_4_button_event).trigger(button_name);
+            else if (remote_slot == 5) id(espnow_pilot_5_button_event).trigger(button_name);
+            else if (remote_slot == 6) id(espnow_pilot_6_button_event).trigger(button_name);
+            else if (remote_slot == 7) id(espnow_pilot_7_button_event).trigger(button_name);
+            else if (remote_slot == 8) id(espnow_pilot_8_button_event).trigger(button_name);
+            else if (remote_slot == 9) id(espnow_pilot_9_button_event).trigger(button_name);
+            else if (remote_slot == 10) id(espnow_pilot_10_button_event).trigger(button_name);
           } else if (action == 1U) {
             ESP_LOGI("espnow_actions", "Pilot %d button %s ignored locally",
                      remote_slot, button_name);
