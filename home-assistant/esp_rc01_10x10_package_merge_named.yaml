@@ -128,11 +128,52 @@ esp_rc01_10x10:
             entity_id: "{{ timer_entity }}"
           data:
             duration: "00:00:02"
-        - event: "{{ 'esp_rc01_pilot_' ~ remote_slot ~ '_button' }}"
-          event_data:
-            sequence: "{{ sequence }}"
-            button_code: "{{ button_code }}"
-            button: "{{ button }}"
-            battery: "{{ battery }}"
-            remote_mac: "{{ remote_mac }}"
-            receiver: "{{ receiver }}"
+        # Home Assistant templates event data, but not the event name itself.
+        # Select one of ten literal names so every pilot has a distinct event.
+        - choose:
+            - conditions: "{{ remote_slot == 1 }}"
+              sequence:
+                - event: esp_rc01_pilot_1_button
+                  event_data: &pilot_event_data
+                    sequence: "{{ sequence }}"
+                    button_code: "{{ button_code }}"
+                    button: "{{ button }}"
+                    battery: "{{ battery }}"
+                    remote_mac: "{{ remote_mac }}"
+                    receiver: "{{ receiver }}"
+            - conditions: "{{ remote_slot == 2 }}"
+              sequence:
+                - event: esp_rc01_pilot_2_button
+                  event_data: *pilot_event_data
+            - conditions: "{{ remote_slot == 3 }}"
+              sequence:
+                - event: esp_rc01_pilot_3_button
+                  event_data: *pilot_event_data
+            - conditions: "{{ remote_slot == 4 }}"
+              sequence:
+                - event: esp_rc01_pilot_4_button
+                  event_data: *pilot_event_data
+            - conditions: "{{ remote_slot == 5 }}"
+              sequence:
+                - event: esp_rc01_pilot_5_button
+                  event_data: *pilot_event_data
+            - conditions: "{{ remote_slot == 6 }}"
+              sequence:
+                - event: esp_rc01_pilot_6_button
+                  event_data: *pilot_event_data
+            - conditions: "{{ remote_slot == 7 }}"
+              sequence:
+                - event: esp_rc01_pilot_7_button
+                  event_data: *pilot_event_data
+            - conditions: "{{ remote_slot == 8 }}"
+              sequence:
+                - event: esp_rc01_pilot_8_button
+                  event_data: *pilot_event_data
+            - conditions: "{{ remote_slot == 9 }}"
+              sequence:
+                - event: esp_rc01_pilot_9_button
+                  event_data: *pilot_event_data
+            - conditions: "{{ remote_slot == 10 }}"
+              sequence:
+                - event: esp_rc01_pilot_10_button
+                  event_data: *pilot_event_data

@@ -1,0 +1,171 @@
+blueprint:
+  name: ESP-RC01 pilot button actions
+  description: >-
+    Assign Home Assistant actions to all buttons of one logical ESP-RC01 pilot.
+    Uses the pilot-specific events emitted by the supplied 10x10 deduplication
+    package, so reception by several AR01V3 devices produces only one action.
+  domain: automation
+  author: Bartosz Supcziński
+  homeassistant:
+    min_version: 2024.6.0
+  input:
+    pilot_section:
+      name: Pilot
+      icon: mdi:remote
+      description: Select the logical pilot slot used during AR01V3 pairing.
+      input:
+        pilot_event:
+          name: ESP-RC01 pilot
+          selector:
+            select:
+              mode: dropdown
+              options:
+                - label: Pilot 1
+                  value: esp_rc01_pilot_1_button
+                - label: Pilot 2
+                  value: esp_rc01_pilot_2_button
+                - label: Pilot 3
+                  value: esp_rc01_pilot_3_button
+                - label: Pilot 4
+                  value: esp_rc01_pilot_4_button
+                - label: Pilot 5
+                  value: esp_rc01_pilot_5_button
+                - label: Pilot 6
+                  value: esp_rc01_pilot_6_button
+                - label: Pilot 7
+                  value: esp_rc01_pilot_7_button
+                - label: Pilot 8
+                  value: esp_rc01_pilot_8_button
+                - label: Pilot 9
+                  value: esp_rc01_pilot_9_button
+                - label: Pilot 10
+                  value: esp_rc01_pilot_10_button
+
+    main_buttons:
+      name: Main buttons
+      icon: mdi:power
+      description: Leave an action empty when the button should do nothing in Home Assistant.
+      input:
+        on_action:
+          name: "ON"
+          default: []
+          selector:
+            action:
+        off_action:
+          name: "OFF"
+          default: []
+          selector:
+            action:
+        night_action:
+          name: Night
+          default: []
+          selector:
+            action:
+        brightness_up_action:
+          name: Brightness up
+          default: []
+          selector:
+            action:
+        brightness_down_action:
+          name: Brightness down
+          default: []
+          selector:
+            action:
+
+    preset_buttons:
+      name: Preset buttons P1–P7
+      icon: mdi:numeric
+      input:
+        p1_action:
+          name: P1
+          default: []
+          selector:
+            action:
+        p2_action:
+          name: P2
+          default: []
+          selector:
+            action:
+        p3_action:
+          name: P3
+          default: []
+          selector:
+            action:
+        p4_action:
+          name: P4
+          default: []
+          selector:
+            action:
+        p5_action:
+          name: P5
+          default: []
+          selector:
+            action:
+        p6_action:
+          name: P6
+          default: []
+          selector:
+            action:
+        p7_action:
+          name: P7
+          default: []
+          selector:
+            action:
+
+triggers:
+  - trigger: event
+    event_type: !input pilot_event
+
+actions:
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ trigger.event.data.button == 'on' }}"
+        sequence: !input on_action
+      - conditions:
+          - condition: template
+            value_template: "{{ trigger.event.data.button == 'off' }}"
+        sequence: !input off_action
+      - conditions:
+          - condition: template
+            value_template: "{{ trigger.event.data.button == 'night' }}"
+        sequence: !input night_action
+      - conditions:
+          - condition: template
+            value_template: "{{ trigger.event.data.button == 'brightness_up' }}"
+        sequence: !input brightness_up_action
+      - conditions:
+          - condition: template
+            value_template: "{{ trigger.event.data.button == 'brightness_down' }}"
+        sequence: !input brightness_down_action
+      - conditions:
+          - condition: template
+            value_template: "{{ trigger.event.data.button == 'p1' }}"
+        sequence: !input p1_action
+      - conditions:
+          - condition: template
+            value_template: "{{ trigger.event.data.button == 'p2' }}"
+        sequence: !input p2_action
+      - conditions:
+          - condition: template
+            value_template: "{{ trigger.event.data.button == 'p3' }}"
+        sequence: !input p3_action
+      - conditions:
+          - condition: template
+            value_template: "{{ trigger.event.data.button == 'p4' }}"
+        sequence: !input p4_action
+      - conditions:
+          - condition: template
+            value_template: "{{ trigger.event.data.button == 'p5' }}"
+        sequence: !input p5_action
+      - conditions:
+          - condition: template
+            value_template: "{{ trigger.event.data.button == 'p6' }}"
+        sequence: !input p6_action
+      - conditions:
+          - condition: template
+            value_template: "{{ trigger.event.data.button == 'p7' }}"
+        sequence: !input p7_action
+mode: parallel
+max: 20
+max_exceeded: silent

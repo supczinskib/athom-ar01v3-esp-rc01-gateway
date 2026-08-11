@@ -146,10 +146,47 @@ for package_name in (
     "esp_rc01_10x10_package_merge_named.yaml",
 ):
     package_text = (root / "home-assistant" / package_name).read_text(encoding="utf-8")
-    if "esp_rc01_pilot_" not in package_text or "_button' }}" not in package_text:
-        errors.append(f"missing pilot-specific deduplicated event in {package_name}")
+    if "- event: \"{{ 'esp_rc01_pilot_' ~ remote_slot ~ '_button' }}\"" in package_text:
+        errors.append(f"templated event name remains in {package_name}")
+    for pilot in range(1, 11):
+        if f"- event: esp_rc01_pilot_{pilot}_button" not in package_text:
+            errors.append(f"missing literal Pilot {pilot} event in {package_name}")
     if "esp_rc01_button" in package_text:
         errors.append(f"obsolete shared ESP-RC01 event remains in {package_name}")
+
+blueprint_path = root / "home-assistant/blueprints/automation/envpl/esp_rc01_remote_actions.yaml"
+if not blueprint_path.is_file():
+    errors.append("missing ESP-RC01 Home Assistant blueprint")
+else:
+    blueprint_text = blueprint_path.read_text(encoding="utf-8")
+    for marker in (
+        "name: ESP-RC01 pilot button actions",
+        "min_version: 2024.6.0",
+        "event_type: !input pilot_event",
+        "value: esp_rc01_pilot_1_button",
+        "value: esp_rc01_pilot_10_button",
+        "sequence: !input on_action",
+        "sequence: !input p7_action",
+    ):
+        if marker not in blueprint_text:
+            errors.append(f"missing Home Assistant blueprint marker: {marker}")
+    for button_name in (
+        "on", "off", "night", "brightness_up", "brightness_down",
+        "p1", "p2", "p3", "p4", "p5", "p6", "p7",
+    ):
+        if f"trigger.event.data.button == '{button_name}'" not in blueprint_text:
+            errors.append(f"missing Home Assistant blueprint action: {button_name}")
+    if "collapsed: true" in blueprint_text:
+        errors.append("Home Assistant blueprint input sections must be expanded by default")
+
+installer_text = (root / "scripts/07_install_ha_package.sh").read_text(encoding="utf-8")
+for marker in (
+    "home-assistant/blueprints/automation/envpl/esp_rc01_remote_actions.yaml",
+    'BLUEPRINT_DST_DIR="$HA_CONFIG/blueprints/automation/envpl"',
+    'install -m 0644 "$BLUEPRINT" "$BLUEPRINT_DST"',
+):
+    if marker not in installer_text:
+        errors.append(f"missing blueprint installer marker: {marker}")
 
 if "timings: int[]" in text:
     errors.append("unsupported API variable type timings: int[] is present")
@@ -245,6 +282,7 @@ required_files = (
     ".github/workflows/ci.yml", ".github/releases/v1.0.0.md",
     ".github/releases/v1.1.0.md",
     ".github/releases/v1.1.1.md",
+    "home-assistant/blueprints/automation/envpl/esp_rc01_remote_actions.yaml",
     "docs/images/README.md", "docs/images/ar01v3-main-page.png",
     "docs/images/flipper-import-page.png",
     "docs/images/home-assistant-stored-actions.png", ".gitignore",

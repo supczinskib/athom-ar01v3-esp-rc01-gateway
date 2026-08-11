@@ -4,8 +4,11 @@ HA_CONFIG=${1:-/var/lib/homeassistant}
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 RAW="$ROOT_DIR/home-assistant/esp_rc01_10x10_package.yaml"
 WRAPPED="$ROOT_DIR/home-assistant/esp_rc01_10x10_package_merge_named.yaml"
+BLUEPRINT="$ROOT_DIR/home-assistant/blueprints/automation/envpl/esp_rc01_remote_actions.yaml"
 DST_DIR="$HA_CONFIG/packages"
 DST="$DST_DIR/esp_rc01_10x10_package.yaml"
+BLUEPRINT_DST_DIR="$HA_CONFIG/blueprints/automation/envpl"
+BLUEPRINT_DST="$BLUEPRINT_DST_DIR/esp_rc01_remote_actions.yaml"
 CONFIG="$HA_CONFIG/configuration.yaml"
 
 if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
@@ -14,6 +17,7 @@ if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
 fi
 [[ -f "$CONFIG" ]] || { echo "$CONFIG was not found"; exit 1; }
 mkdir -p "$DST_DIR"
+mkdir -p "$BLUEPRINT_DST_DIR"
 BACKUP="$CONFIG.backup-espnow-$(date +%Y%m%d-%H%M%S)"
 cp -a "$CONFIG" "$BACKUP"
 
@@ -61,4 +65,8 @@ PY2
 fi
 chown --reference="$CONFIG" "$DST" 2>/dev/null || true
 chmod 0644 "$DST"
+install -m 0644 "$BLUEPRINT" "$BLUEPRINT_DST"
+chown --reference="$CONFIG" "$BLUEPRINT_DST" 2>/dev/null || true
+chmod 0644 "$BLUEPRINT_DST"
 echo "Home Assistant package: $DST"
+echo "Home Assistant blueprint: $BLUEPRINT_DST"

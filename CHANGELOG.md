@@ -2,6 +2,12 @@
 
 All notable project changes are documented here.
 
+## Unreleased
+
+- Added a Home Assistant blueprint that configures all actions of one logical ESP-RC01 pilot in a single GUI automation.
+- Extended the Home Assistant package installer to install the blueprint automatically.
+- Fixed pilot-specific Home Assistant event emission by using literal event names selected for logical Pilot 1 through Pilot 10.
+
 ## 1.1.1 — 2026-08-10
 
 - Added parsed Flipper `NECext` IR import with exact 16-bit address and command preservation.
@@ -31,7 +37,7 @@ All notable project changes are documented here.
 - Added author-approved screenshots of the AR01V3 main page, integrated Flipper importer, and Home Assistant stored-signal actions.
 - Added ten independent AR01V3 receiver configurations and ten logical ESP-RC01 pairing slots per receiver.
 - Added centralized Home Assistant packet deduplication and the canonical `esp_rc01_button` event.
-- Added persistent ESP-NOW pairing, battery reporting, hold events, sequence data, receiver identity, and diagnostics.
+- Added persistent ESP-NOW pairing, battery reporting, button events, sequence data, receiver identity, and diagnostics.
 - Added protocol-aware RF learning using three matching RC-Switch frames.
 - Added the verified protocol-6 to Princeton transmit mapping used by compatible 24-bit remotes.
 - Added ten IR and sixteen RF persistent signal slots shared by learning, Flipper import, local sending, and Home Assistant.

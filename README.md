@@ -22,7 +22,7 @@ Once a compatible signal file or definition is available, an installed gateway c
 
 ESP-RC01 support adds a second role: inexpensive physical remotes can trigger Home Assistant actions through ESP-NOW or directly transmit a stored IR/RF command from the receiving AR01V3. The local assignment is stored in the gateway and does not require an active Home Assistant connection. For buttons routed to Home Assistant, several AR01V3 receivers can hear the same remote for wider coverage, while the supplied package removes duplicate receptions and emits one pilot-specific event.
 
-Signals can enter the system in three ways: local learning, import of a supported file, or a direct Home Assistant action that does not use a slot. These are complementary input methods, not the main purpose of the project.
+Signals can enter the system in three ways: local learning, import of a supported file, or a direct Home Assistant action that does not use a slot.
 
 ## Adding signals and optional Flipper support
 
@@ -32,7 +32,7 @@ The AR01V3 uses inexpensive fixed-frequency 433.92 MHz OOK/ASK hardware. It is a
 
 Not every RF capture is universal. Files may contain a transmitter identifier, channel, address, or pairing information, so a capture from another installation is not guaranteed to work unchanged with every motor or receiver. Even when direct reuse is not possible, a verified capture can provide reference data for improving native protocol support.
 
-The compatibility claim is intentionally precise: this is not a promise to transmit every signal supported by Flipper Zero. The AR01V3 hardware is limited to 433.92 MHz OOK/ASK RF and its supported IR transmit path.
+Flipper compatibility is limited to the formats listed below and to the AR01V3's 433.92 MHz OOK/ASK RF hardware and supported IR transmit path.
 
 ## Flipper format compatibility
 
@@ -114,8 +114,8 @@ The embedded web interface uses HTTP Digest authentication but does not provide 
 ### ESP-RC01 and multiple receivers
 
 - Ten logical ESP-RC01 pairing slots on every AR01V3 receiver.
-- Persistent remote MAC pairing, 60-second pairing window, clearing, battery value, button name/code, packet sequence, hold events, and receiver identity.
-- Persistent assignments for all 16 supported button events of every paired remote.
+- Persistent remote MAC pairing, 60-second pairing window, clearing, battery value, button name/code, packet sequence, and receiver identity.
+- Persistent assignments for the buttons reported by every paired remote.
 - Per-button choices: `Home Assistant`, `Ignore`, any IR slot `0..9`, or any RF slot `0..15`.
 - Ten separate `ESP-NOW Pilot N Button` event entities let Home Assistant distinguish identical buttons on different pilots in GUI automations.
 - A local IR/RF assignment is executed by the AR01V3 itself and continues to work without an active Home Assistant connection.
@@ -162,7 +162,7 @@ Do not flash this configuration to a different hardware revision without verifyi
 | `esphome/ar01v3-01.yaml` … `ar01v3-10.yaml` | Ten unique receiver entry points |
 | `esphome/ar01v3-espnow-10x10-base.yaml` | Shared firmware configuration |
 | `esphome/components/` | Persistent storage and Flipper importer components |
-| `home-assistant/` | ESP-RC01 deduplication package and examples |
+| `home-assistant/` | ESP-RC01 deduplication package, automation blueprint, and examples |
 | `examples/` | Neutral Princeton, Dooya, and NEC fixtures |
 | `scripts/` | Installation, configuration, validation, build, upload, and log helpers |
 | `tests/` | Host-side regression and component build tests |
@@ -463,7 +463,7 @@ The logical slot is part of Home Assistant's deduplication key. Do not place one
 First store and test the required command in an IR or RF slot. Then open the authenticated main page of the AR01V3 that should transmit it:
 
 1. Under **ESP-RC01 Button Assignment**, choose the paired **Pilot**.
-2. Choose the physical **Button**, including a hold variant when required.
+2. Choose the physical **Button**.
 3. Under **Action**, select an IR slot, an RF slot, `Home Assistant`, or `Ignore`.
 4. Confirm the resulting mapping in the **Assignment** row.
 5. Press the physical button and verify the target device reacts.
@@ -488,6 +488,31 @@ For Home Assistant OS, copy one of the following manually with Studio Code Serve
 - use `home-assistant/esp_rc01_10x10_package_merge_named.yaml` with `packages: !include_dir_merge_named packages`.
 
 Install only one variant, check the Home Assistant configuration, and restart Home Assistant. The package automation may be visible as read-only in the UI because it is defined in a package rather than `automations.yaml`; that is expected. Create your own user automations in the GUI and trigger them from the required pilot-specific event.
+
+### Simplified whole-pilot setup in the GUI
+
+The included `ESP-RC01 pilot button actions` blueprint configures every button of one logical pilot in a single GUI automation without manually entering event names or YAML event data.
+
+The installer copies both the deduplication package and the blueprint:
+
+```bash
+sudo bash scripts/07_install_ha_package.sh /var/lib/homeassistant
+```
+
+After installation:
+
+1. Restart Home Assistant.
+2. Open **Settings → Automations & scenes → Blueprints**.
+3. Select **ESP-RC01 pilot button actions** to create an automation from it.
+4. Name the automation, for example `Pilot 1`.
+5. Under **ESP-RC01 pilot**, select the logical pilot number used during pairing, for example **Pilot 1**.
+6. Under **Main buttons**, add actions for ON, OFF, Night, and brightness control.
+7. Under **Preset buttons P1–P7**, add the required preset actions.
+8. Leave unused action fields empty.
+9. Save the automation and test the physical pilot.
+10. Create another automation from the same blueprint for each additional pilot.
+
+On the AR01V3 page, every button handled by the blueprint must use the `Home Assistant` assignment. A local slot assignment or `Ignore` emits no Home Assistant event. Do not assign the same button to both the blueprint and a separate Home Assistant automation unless both actions are intended.
 
 ### Create a remote-button automation in the GUI
 
@@ -588,7 +613,6 @@ Run `scripts/00_self_test.sh` afterward. Do not edit `flipper_page.h` by hand.
 - Third-party provenance: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 - Security reports: [SECURITY.md](SECURITY.md).
 - Contribution rules: [CONTRIBUTING.md](CONTRIBUTING.md).
-- Prepared GitHub repository metadata and release text: [GITHUB_PUBLISHING.md](GITHUB_PUBLISHING.md) and [.github/releases/v1.1.1.md](.github/releases/v1.1.1.md).
 
 Parts of the hardware configuration and storage component originate from Athom's public ESPHome configuration repository. Athom retains all rights to its original work. Project-specific additions are provided under `GPL-3.0-only`; the detailed attribution and licensing status of upstream material are recorded separately in `THIRD_PARTY_NOTICES.md`.
 

@@ -22,7 +22,7 @@ Gdy dostępny jest zgodny plik albo definicja sygnału, zainstalowaną bramkę m
 
 Obsługa ESP-RC01 dodaje drugą rolę: niedrogie fizyczne piloty mogą przez ESP-NOW uruchamiać działania Home Assistant albo bezpośrednio wysyłać zapisane polecenie IR/RF z odbierającego AR01V3. Przypisanie lokalne jest zapisane w bramce i nie wymaga aktywnego połączenia z Home Assistant. Dla przycisków przekazywanych do HA kilka odbiorników AR01V3 może słuchać tego samego pilota, zapewniając większy zasięg, a dołączony pakiet usuwa duplikaty odbioru i generuje jedno kanoniczne zdarzenie.
 
-Sygnał można dostarczyć do systemu na trzy sposoby: przez lokalną naukę, import obsługiwanego pliku albo bezpośrednią akcję Home Assistant, która nie korzysta ze slotu. Są to uzupełniające się sposoby wprowadzania danych, a nie główny cel projektu.
+Sygnał można dostarczyć do systemu na trzy sposoby: przez lokalną naukę, import obsługiwanego pliku albo bezpośrednią akcję Home Assistant, która nie korzysta ze slotu.
 
 ## Dodawanie sygnałów i opcjonalna obsługa Flippera
 
@@ -32,7 +32,7 @@ AR01V3 korzysta z niedrogiego sprzętu OOK/ASK pracującego na stałej częstotl
 
 Nie każde przechwycenie RF jest uniwersalne. Plik może zawierać identyfikator nadajnika, kanał, adres albo informacje związane z parowaniem, dlatego sygnał pochodzący z innej instalacji nie musi bez zmian zadziałać z każdym silnikiem lub odbiornikiem. Nawet gdy bezpośrednie wykorzystanie pliku nie jest możliwe, zweryfikowane przechwycenie może dostarczyć danych potrzebnych do poprawienia natywnej obsługi protokołu.
 
-Zakres zgodności jest opisany precyzyjnie: projekt nie obiecuje wysyłania każdego sygnału obsługiwanego przez Flipper Zero. Sprzęt AR01V3 jest ograniczony do RF 433,92 MHz OOK/ASK oraz obsługiwanej ścieżki nadawczej IR.
+Zgodność z Flipperem jest ograniczona do formatów wymienionych poniżej oraz do sprzętu RF 433,92 MHz OOK/ASK i obsługiwanej ścieżki nadawczej IR w AR01V3.
 
 ## Zgodność z formatami Flippera
 
@@ -114,8 +114,8 @@ Wbudowany interfejs WWW korzysta z uwierzytelniania HTTP Digest, ale nie zapewni
 ### ESP-RC01 i wiele odbiorników
 
 - Dziesięć logicznych slotów parowania ESP-RC01 w każdym AR01V3.
-- Trwałe zapisywanie MAC, 60-sekundowe okno parowania, kasowanie pary, bateria, nazwa i kod przycisku, numer sekwencji, zdarzenia przytrzymania i identyfikator odbiornika.
-- Trwałe przypisania wszystkich 16 obsługiwanych zdarzeń przycisków każdego sparowanego pilota.
+- Trwałe zapisywanie MAC, 60-sekundowe okno parowania, kasowanie pary, bateria, nazwa i kod przycisku, numer sekwencji oraz identyfikator odbiornika.
+- Trwałe przypisania przycisków zgłaszanych przez każdy sparowany pilot.
 - Dla każdego przycisku można wybrać `Home Assistant`, `Ignore`, dowolny slot IR `0..9` albo dowolny slot RF `0..15`.
 - Dziesięć osobnych encji zdarzeń `ESP-NOW Pilot N Button` pozwala rozróżnić w automatyzacjach GUI te same przyciski na różnych pilotach.
 - Lokalne przypisanie IR/RF wykonuje sam AR01V3 i działa bez aktywnego połączenia z Home Assistant.
@@ -162,7 +162,7 @@ Nie należy wgrywać tej konfiguracji do innej rewizji urządzenia bez sprawdzen
 | `esphome/ar01v3-01.yaml` … `ar01v3-10.yaml` | Dziesięć unikalnych konfiguracji odbiorników |
 | `esphome/ar01v3-espnow-10x10-base.yaml` | Wspólna konfiguracja firmware |
 | `esphome/components/` | Pamięć sygnałów i importer Flippera |
-| `home-assistant/` | Pakiet deduplikacji ESP-RC01 i przykłady |
+| `home-assistant/` | Pakiet deduplikacji ESP-RC01, schemat automatyzacji i przykłady |
 | `examples/` | Neutralne przykłady Princeton, Dooya i NEC |
 | `scripts/` | Instalacja, konfiguracja, walidacja, kompilacja, wgrywanie i logi |
 | `tests/` | Testy regresji i kompilacji komponentów na komputerze |
@@ -457,7 +457,7 @@ Logiczny slot jest częścią mechanizmu deduplikacji. Ten sam pilot nie może z
 Najpierw zapisz i przetestuj potrzebne polecenie w slocie IR albo RF. Następnie otwórz chronioną hasłem stronę główną AR01V3, który ma je nadawać:
 
 1. W sekcji **ESP-RC01 Button Assignment** wybierz sparowanego **Pilot**.
-2. Wybierz fizyczny **Button**, w razie potrzeby także wariant przytrzymania.
+2. Wybierz fizyczny **Button**.
 3. W polu **Action** wybierz slot IR, slot RF, `Home Assistant` albo `Ignore`.
 4. Sprawdź gotowe mapowanie w wierszu **Assignment**.
 5. Naciśnij fizyczny przycisk i sprawdź reakcję sterowanego urządzenia.
@@ -482,6 +482,31 @@ W Home Assistant OS należy skopiować ręcznie jeden wariant przez Studio Code 
 - `home-assistant/esp_rc01_10x10_package_merge_named.yaml` dla `packages: !include_dir_merge_named packages`.
 
 Zainstaluj tylko jeden wariant, sprawdź konfigurację i zrestartuj Home Assistant. Automatyzacja pakietu może być tylko do odczytu w GUI, ponieważ nie znajduje się w `automations.yaml`; jest to prawidłowe. Własne automatyzacje tworzy się normalnie w GUI i wyzwala zdarzeniem wynikowym.
+
+### Uproszczona konfiguracja całego pilota w GUI
+
+Dołączony schemat automatyzacji `ESP-RC01 pilot button actions` pozwala skonfigurować wszystkie przyciski jednego logicznego pilota w jednej automatyzacji GUI, bez ręcznego wpisywania nazw zdarzeń i danych YAML.
+
+Skrypt instalacyjny kopiuje pakiet deduplikujący i schemat automatyzacji:
+
+```bash
+sudo bash scripts/07_install_ha_package.sh /var/lib/homeassistant
+```
+
+Po instalacji:
+
+1. Zrestartuj Home Assistant.
+2. Otwórz **Ustawienia → Automatyzacje i sceny → Schematy**.
+3. Wybierz **ESP-RC01 pilot button actions**, aby utworzyć z niego automatyzację.
+4. Nadaj automatyzacji nazwę, np. `Pilot 1`.
+5. W polu **ESP-RC01 pilot** wybierz logiczny numer pilota użyty podczas parowania, np. **Pilot 1**.
+6. W sekcji **Main buttons** dodaj działania dla ON, OFF, Night oraz regulacji jasności.
+7. W sekcji **Preset buttons P1–P7** dodaj potrzebne działania przycisków programowalnych.
+8. Nieużywane pola pozostaw puste.
+9. Zapisz automatyzację i sprawdź fizyczny pilot.
+10. Dla kolejnego pilota utwórz następną automatyzację z tego samego schematu.
+
+Na stronie AR01V3 każdy przycisk obsługiwany przez schemat musi mieć przypisaną akcję `Home Assistant`. Przypisanie lokalnego slotu albo `Ignore` nie generuje zdarzenia HA. Nie przypisuj tego samego przycisku jednocześnie do schematu i osobnej automatyzacji Home Assistant, chyba że oba działania są zamierzone.
 
 ### Automatyzacja przycisku pilota w GUI
 
@@ -574,7 +599,6 @@ Następnie trzeba uruchomić `scripts/00_self_test.sh`. Pliku `flipper_page.h` n
 - Pochodzenie elementów zewnętrznych: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 - Zgłaszanie problemów bezpieczeństwa: [SECURITY.md](SECURITY.md).
 - Zasady współtworzenia: [CONTRIBUTING.md](CONTRIBUTING.md).
-- Przygotowane metadane repozytorium i opis wydania GitHub: [GITHUB_PUBLISHING.md](GITHUB_PUBLISHING.md) oraz [.github/releases/v1.1.1.md](.github/releases/v1.1.1.md).
 
 Część konfiguracji sprzętowej i komponentu pamięci pochodzi z publicznego repozytorium konfiguracji ESPHome firmy Athom. Athom zachowuje prawa do swojej oryginalnej pracy. Dodatki specyficzne dla tego projektu są udostępniane na licencji `GPL-3.0-only`, a szczegółowe informacje o pochodzeniu i statusie elementów zewnętrznych znajdują się w `THIRD_PARTY_NOTICES.md`.
 
