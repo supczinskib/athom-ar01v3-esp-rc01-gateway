@@ -1,16 +1,19 @@
-# AR01V3 ESP-RC01 Gateway
+# Bramka AR01V3 RF/IR, ESP-RC01 i Steinel NightmatIQ Plus
 
 [![CI](https://github.com/supczinskib/athom-ar01v3-esp-rc01-gateway/actions/workflows/ci.yml/badge.svg)](https://github.com/supczinskib/athom-ar01v3-esp-rc01-gateway/actions/workflows/ci.yml)
 
 [English README](README.md)
 
-> **Lokalne sterowanie RF, IR i ESP-RC01 z Home Assistant lub bez niego.**
+> **Lokalne sterowanie RF, IR, ESP-RC01 i opcjonalnym Steinel NightmatIQ Plus z Home Assistant lub bez niego.**
 
 ```text
 Pilot RF/IR -> Flipper Zero -> plik .sub/.ir -> bramka AR01V3 (+ opcjonalne piloty ESP-RC01) -> Home Assistant
+Steinel NightmatIQ Plus <-> Bluetooth Mesh <-> bramka AR01V3 -> Home Assistant
 ```
 
 Społecznościowy firmware ESPHome, który przekształca oparty na ESP32 Athom AR01V3 w lokalną bramkę RF, IR i ESP-NOW. Zapewnia 16 trwałych slotów RF i 10 trwałych slotów IR, zdalne programowanie sygnałów przez sieć, standardowe encje przycisków Home Assistant, parametryzowane i wygodne w GUI akcje nadawania oraz obsługę do 10 pilotów ESP-RC01 przez maksymalnie 10 odbiorników AR01V3. Każdy przycisk ESP-RC01 może zostać przekazany do Home Assistant albo bezpośrednio przypisany do zapisanego slotu IR/RF, co umożliwia autonomiczne działanie bez dostępnego Home Assistant. Zapisane polecenia można również przypisywać do wirtualnych urządzeń, skryptów, scen i automatyzacji bez zahardkodowanych mapowań sprzętu.
+
+Wersja 1.2.0 dodaje opcjonalną lokalną integrację Bluetooth Mesh i Home Assistant ze Steinel IS Digi NM 2E6915 NightmatIQ Plus, zachowując w tym samym firmware funkcje RF, IR, ESP-NOW, import Flippera i OTA.
 
 Autor i opiekun projektu: **Bartosz Supcziński** — <bartek@env.pl>
 
@@ -65,6 +68,12 @@ Strona `/flipper` importuje i testuje obsługiwane pliki `.sub` i `.ir` bezpośr
 Każdy zapisany slot IR i RF jest dostępny jako zwykły przycisk Home Assistant w urządzeniu `AR01V3 Stored Signal Actions`.
 
 ![AR01V3 Stored Signal Actions w Home Assistant](docs/images/home-assistant-stored-actions.png)
+
+### Steinel NightmatIQ Plus
+
+Chroniona strona `/steinel` importuje wybraną sieć Steinel, steruje opcjonalnym trybem Bluetooth Mesh oraz pokazuje potwierdzony stan urządzenia i diagnostykę.
+
+![Strona integracji Steinel NightmatIQ Plus](docs/images/steinel.png)
 
 ## Najważniejsze możliwości
 
@@ -139,6 +148,18 @@ Wbudowany interfejs WWW korzysta z uwierzytelniania HTTP Digest, ale nie zapewni
 - Bluetooth Proxy z dwoma slotami połączeń.
 - Diagnostyka Wi-Fi, uptime, restart, safe mode, factory reset, awaryjny punkt dostępowy i dioda statusu.
 - Encje klimatyzacji IR odziedziczone z konfiguracji bazowej.
+
+### Opcjonalna integracja Steinel NightmatIQ Plus
+
+Zwykły firmware zawiera chronioną stronę `/steinel`, która może pobrać z chmury
+Steinel kopię wybranej sieci bez zapisywania hasła konta. Integracja tworzy w
+Home Assistant osobne urządzenie NightmatIQ z natężeniem światła, progiem
+zmierzchowym, trybem pracy, odpornym stanem rzeczywistego wyjścia, zainstalowaną
+wersją firmware, rewizją sprzętową, Company ID i Product ID. AR01V3 domyślnie
+działa jako Bluetooth Proxy; włączenie NightmatIQ przełącza następny start na
+Bluetooth Mesh. Wyłączenie przez WWW zachowuje dane Mesh i po restarcie
+przywraca Bluetooth Proxy. RF, IR i ESP-NOW pozostają dostępne w obu trybach.
+Szczegóły zawiera [polska instrukcja NightmatIQ](docs/NIGHTMATIQ_PL.md).
 
 ## Sprzęt i GPIO
 
@@ -361,7 +382,7 @@ Import do zajętego slotu zastępuje poprzedni rekord. Oryginalne pliki warto za
 
 Główne urządzenie jest widoczne jako **Athom RF IR Remote**. Home Assistant może osobno pokazać **AR01V3 Stored Signal Actions**. To celowe podurządzenie z 26 przyciskami przygotowanymi do użycia w wirtualnych urządzeniach, skryptach, scenach i automatyzacjach.
 
-Jeżeli po aktualizacji firmware przycisków nie widać, przeładuj integrację ESPHome lub uruchom ponownie Home Assistant i sprawdź wersję projektu `1.1.2`.
+Jeżeli po aktualizacji firmware przycisków nie widać, przeładuj integrację ESPHome lub uruchom ponownie Home Assistant i sprawdź wersję projektu `1.2.0`.
 
 ### Wywołanie zapisanego slotu w GUI
 
@@ -578,12 +599,15 @@ Zdarzenie pilota zawiera również `sequence`, `button_code`, `battery`, `remote
 
 ### Akcji nie widać w HA
 
-- Sprawdź połączenie integracji ESPHome i wersję projektu `1.1.2`.
+- Sprawdź połączenie integracji ESPHome i wersję projektu `1.2.0`.
 - Po aktualizacji firmware przeładuj integrację ESPHome lub zrestartuj HA.
 - Dla slotów wybierz akcję **Przycisk: Naciśnij** i encję `Send IR Slot N` albo `Send RF Slot N`; sensor podglądu nie nadaje.
 - Akcje bezpośrednie zaczynają się od `esphome.<nazwa_węzła>_transmit_...`.
 
-## Rozwój strony `/flipper`
+## Rozwój lokalnych stron WWW
+
+Plik `esphome/ar01v3_web_v3.js` jest osadzany bezpośrednio przez ESPHome za
+pomocą `js_include`. Po jego zmianie nie trzeba uruchamiać osobnego generatora.
 
 Po zmianie `esphome/components/flipper_importer/flipper_page.html` należy odtworzyć skompresowany nagłówek:
 
@@ -591,7 +615,13 @@ Po zmianie `esphome/components/flipper_importer/flipper_page.html` należy odtwo
 python3 scripts/generate_flipper_page.py
 ```
 
-Następnie trzeba uruchomić `scripts/00_self_test.sh`. Pliku `flipper_page.h` nie należy edytować ręcznie.
+Po zmianie `esphome/components/nightmatiq_mesh/nightmatiq_page.html` należy odtworzyć jego skompresowany nagłówek:
+
+```bash
+python3 scripts/generate_nightmatiq_page.py
+```
+
+Następnie trzeba uruchomić `scripts/00_self_test.sh`. Wygenerowanych nagłówków nie należy edytować ręcznie.
 
 ## Autor, licencja i bezpieczeństwo
 

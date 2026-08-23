@@ -35,3 +35,15 @@ require_secrets() {
     return 1
   fi
 }
+
+patch_esphome_api() {
+  local esphome_bin="$1"
+  local venv_python
+  venv_python="$(dirname "$esphome_bin")/python"
+  if [[ ! -x "$venv_python" ]]; then
+    echo "ERROR: cannot locate the Python interpreter belonging to $esphome_bin" >&2
+    return 1
+  fi
+  "$venv_python" "$(project_root)/scripts/patch_esphome_api.py"
+  "$venv_python" "$(project_root)/scripts/patch_esphome_ble_tracker.py"
+}

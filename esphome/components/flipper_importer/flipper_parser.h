@@ -64,7 +64,7 @@ inline constexpr int32_t SIGNAL_VERSION = 3;
 inline constexpr size_t SIGNAL_V2_HEADER_WORDS = 8;
 inline constexpr size_t SIGNAL_HEADER_WORDS = 15;
 inline constexpr size_t MAX_SIGNAL_TIMINGS = 2048;
-inline constexpr size_t MAX_FLIPPER_FILE_BYTES = 24576;
+inline constexpr size_t MAX_FLIPPER_FILE_BYTES = 12 * 1024;
 
 inline std::string trim_copy(const std::string &input) {
   const auto first = input.find_first_not_of(" \t\r\n");
@@ -611,10 +611,8 @@ inline PrincetonFrame decode_princeton_capture(const std::vector<int32_t> &input
     return true;
   };
 
-  // First use exact guard-to-guard cycles. This is the most reliable alignment
-  // for captures such as the user's 137->136 sample: its prefix is partial but
-  // the interval between the following two guards is a complete 50-timing
-  // Princeton frame.
+  // First use exact guard-to-guard cycles. This reliably handles captures with
+  // a partial prefix followed by a complete Princeton frame.
   for (size_t i = 0; i < boundaries.size(); i++) {
     const size_t end = boundaries[i];
     const size_t start = i == 0 ? 0 : boundaries[i - 1] + 1;
@@ -1137,7 +1135,7 @@ inline bool parse_sub_file(const std::string &text, ParsedSignal &signal, std::s
 
 inline bool parse_flipper_file(const std::string &text, ParsedSignal &signal, std::string &error) {
   if (text.size() > MAX_FLIPPER_FILE_BYTES) {
-    error = "File exceeds 24 KiB";
+    error = "File exceeds 12 KiB";
     return false;
   }
   const std::string lower = lower_copy(text.substr(0, std::min<size_t>(text.size(), 256)));

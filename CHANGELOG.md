@@ -4,6 +4,39 @@ All notable project changes are documented here.
 
 ## Unreleased
 
+## 1.2.0 — 2026-08-23
+
+- Added optional Steinel NightmatIQ Plus support to the normal firmware used by
+  all ten AR01V3 receiver configurations.
+- Added the authenticated `/steinel` page for selecting and importing a Steinel
+  Cloud network without saving the account credentials.
+- Added persistent controls for enabling, disabling and removing NightmatIQ
+  while keeping Bluetooth Proxy as the default mode.
+- Added immediate remove-and-reimport support and authenticated per-network IV
+  Index caching without requiring a manual gateway restart.
+- Streamed Steinel backups through the inactive OTA slot and parsed only the
+  required records, keeping large cloud responses out of internal RAM.
+- Added authenticated Bluetooth Mesh reads and writes for actual light output,
+  illuminance, twilight threshold and operating mode.
+- Added a separate Home Assistant device with resilient actual-output state,
+  illuminance, threshold, mode, installed firmware, hardware revision,
+  manufacturer, Company ID, Product ID, readiness, status and manual refresh.
+- Kept the last confirmed output state across transient Mesh misses and marks it
+  unavailable only after five minutes without a valid response, or immediately
+  when NightmatIQ is disabled or removed.
+- Added bounded retries for the two Home Assistant-critical reads and automatic
+  discovery of the element that provides illuminance data.
+- Read installed firmware and hardware revision from the Steinel manufacturer
+  advertisement captured during gateway startup and verify its Product ID
+  against authenticated Mesh Composition Data.
+- Stabilized the constrained ESP32 runtime by deferring Home Assistant updates
+  to the main loop, bounding API buffers and right-sizing Bluetooth Mesh, HTTP,
+  Bluetooth and TLS resources while retaining the existing feature set.
+- Added runtime, reset, heap and Mesh diagnostics to the NightmatIQ page.
+- Preserved RF 433.92 MHz, IR, ESP-NOW, stored slots, Flipper import, OTA and the
+  existing Home Assistant functionality in the unified firmware.
+- Updated the English and Polish documentation and project screenshots.
+
 ## 1.1.2 — 2026-08-11
 
 - Added a Home Assistant blueprint that configures all actions of one logical ESP-RC01 pilot in a single GUI automation.

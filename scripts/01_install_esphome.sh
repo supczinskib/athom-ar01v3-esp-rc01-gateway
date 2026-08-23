@@ -21,3 +21,5 @@ python3 -m venv "$VENV"
 "$VENV/bin/python" -m pip install --upgrade pip wheel
 "$VENV/bin/python" -m pip install --upgrade "esphome==2026.7.3"
 "$VENV/bin/esphome" version
+"$VENV/bin/python" "$(cd "$(dirname "$0")/.." && pwd)/scripts/patch_esphome_api.py"
+"$VENV/bin/python" "$(cd "$(dirname "$0")/.." && pwd)/scripts/patch_esphome_ble_tracker.py"

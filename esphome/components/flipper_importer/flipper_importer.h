@@ -83,6 +83,7 @@ class FlipperImporter final : public Component, public AsyncWebHandler {
   void handle_test_(AsyncWebServerRequest *request);
   void handle_status_(AsyncWebServerRequest *request);
   void handle_capture_(AsyncWebServerRequest *request);
+  void release_upload_body_();
   static void send_text_response_(AsyncWebServerRequest *request, int code, const char *content_type,
                                   const std::string &body);
   static void send_ui_result_(AsyncWebServerRequest *request, int code, const std::string &message);

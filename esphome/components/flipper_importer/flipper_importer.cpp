@@ -39,7 +39,7 @@ bool FlipperImporter::canHandle(AsyncWebServerRequest *request) const {
 void FlipperImporter::handleBody(AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
   (void) request;
   if (index == 0) {
-    this->upload_body_.clear();
+    this->release_upload_body_();
     this->upload_too_large_ = total > MAX_UPLOAD_BYTES;
     if (!this->upload_too_large_) this->upload_body_.reserve(total);
   }
@@ -54,7 +54,7 @@ void FlipperImporter::handleUpload(AsyncWebServerRequest *request, const std::st
   (void) request;
   (void) filename;
   if (index == 0) {
-    this->upload_body_.clear();
+    this->release_upload_body_();
     this->upload_too_large_ = false;
   }
   if (data != nullptr && len > 0) {
@@ -64,7 +64,13 @@ void FlipperImporter::handleUpload(AsyncWebServerRequest *request, const std::st
       this->upload_too_large_ = true;
   }
   if (final && this->upload_too_large_)
-    this->upload_body_.clear();
+    this->release_upload_body_();
+}
+
+void FlipperImporter::release_upload_body_() {
+  // clear() preserves std::string capacity in libstdc++; swapping with an
+  // empty string returns a potentially multi-kilobyte upload buffer to heap.
+  std::string{}.swap(this->upload_body_);
 }
 
 void FlipperImporter::handleRequest(AsyncWebServerRequest *request) {
@@ -157,24 +163,24 @@ bool FlipperImporter::parse_slot_(AsyncWebServerRequest *request, SignalKind kin
 
 void FlipperImporter::handle_import_(AsyncWebServerRequest *request) {
   if (this->upload_too_large_) {
-    this->upload_body_.clear();
-    if (request->arg("ui") == "1") send_ui_result_(request, 400, "File exceeds 24 KiB");
+    this->release_upload_body_();
+    if (request->arg("ui") == "1") send_ui_result_(request, 400, "File exceeds 12 KiB");
     else send_text_response_(request, 400, "application/json; charset=utf-8",
-                             "{\"message\":\"File exceeds 24 KiB\"}");
+                             "{\"message\":\"File exceeds 12 KiB\"}");
     return;
   }
 
   ParsedSignal parsed;
   std::string error;
   if (!parse_flipper_file(this->upload_body_, parsed, error)) {
-    this->upload_body_.clear();
+    this->release_upload_body_();
     const std::string body = "{\"message\":\"Import failed: " + json_escape_(error) + "\"}";
     this->set_last_status_("Import failed: " + error);
     if (request->arg("ui") == "1") send_ui_result_(request, 422, "Import failed: " + error);
     else send_text_response_(request, 422, "application/json; charset=utf-8", body);
     return;
   }
-  this->upload_body_.clear();
+  this->release_upload_body_();
 
   const std::string requested_kind = lower_copy(request->arg("kind"));
   if ((requested_kind == "ir" && parsed.kind != SignalKind::IR) ||
@@ -200,19 +206,19 @@ void FlipperImporter::handle_import_(AsyncWebServerRequest *request) {
                              (parsed.kind == SignalKind::IR ? "IR " : "RF ") + std::to_string(slot);
   this->set_last_status_(queued);
   const bool test_after_import = request->arg("test") == "1";
-  const ParsedSignal parsed_copy = parsed;
-  this->defer([this, slot, parsed_copy, test_after_import]() {
-    const bool ok = this->save_signal_(slot, parsed_copy, true);
-    if (!ok) this->publish_status_(parsed_copy.kind, "NVS write failed");
+  const uint8_t recommended_repeats = parsed.recommended_repeats;
+  this->defer([this, slot, parsed = std::move(parsed), test_after_import]() {
+    const bool ok = this->save_signal_(slot, parsed, true);
+    if (!ok) this->publish_status_(parsed.kind, "NVS write failed");
     else if (test_after_import) {
-      if (parsed_copy.kind == SignalKind::IR) this->send_ir_slot(slot);
+      if (parsed.kind == SignalKind::IR) this->send_ir_slot(slot);
       else this->send_rf_slot(slot, 0, 0);
     }
   });
 
   const std::string body = "{\"message\":\"" + json_escape_(queued) +
                            "\",\"details\":\"" + json_escape_(details) +
-                           "\",\"recommended_repeats\":" + std::to_string(parsed.recommended_repeats) + "}";
+                           "\",\"recommended_repeats\":" + std::to_string(recommended_repeats) + "}";
   if (request->arg("ui") == "1") send_ui_result_(request, 200, queued + ". " + details);
   else send_text_response_(request, 200, "application/json; charset=utf-8", body);
 }

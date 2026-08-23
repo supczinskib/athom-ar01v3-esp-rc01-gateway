@@ -64,10 +64,15 @@ publication_mode = sys.argv[2] == "true"
 base = root / "esphome" / "ar01v3-espnow-10x10-base.yaml"
 text = base.read_text(encoding="utf-8")
 errors: list[str] = []
+generated_parts = {".esphome", ".git", "__pycache__"}
+
+
+def is_generated(path: Path) -> bool:
+    return any(part in generated_parts for part in path.relative_to(root).parts)
 
 required_base = (
     'project_name: "envpl.ar01v3_esp_rc01_gateway"',
-    'project_version: "1.1.2"',
+    'project_version: "1.2.0"',
     'type: digest',
     'username: !secret web_server_username',
     'password: !secret web_server_password',
@@ -88,9 +93,32 @@ required_base = (
     'js_url: ""',
     'js_include: ar01v3_web_v3.js',
     'include_internal: true',
-    'components: [Flash_comp, flipper_importer]',
+    'components: [Flash_comp, flipper_importer, nightmatiq_mesh]',
+    'CONFIG_BLE_MESH_PROVISIONER: y',
+    'CONFIG_BT_BLE_DYNAMIC_ENV_MEMORY: y',
+    'CONFIG_BTDM_CTRL_BLE_MAX_CONN: "2"',
+    'CONFIG_BLE_MESH_ADV_BUF_COUNT: "6"',
+    'CONFIG_BLE_MESH_WAIT_FOR_PROV_MAX_DEV_NUM: "1"',
+    'CONFIG_BLE_MESH_MAX_PROV_NODES: "1"',
+    'CONFIG_BLE_MESH_PBA_SAME_TIME: "1"',
+    'CONFIG_BLE_MESH_LABEL_COUNT: "1"',
+    'CONFIG_BLE_MESH_HEALTH_SRV: n',
+    'CONFIG_BLE_MESH_PROXY: n',
+    'CONFIG_BLE_MESH_TX_SEG_MSG_COUNT: "1"',
+    'CONFIG_BLE_MESH_RX_SEG_MSG_COUNT: "1"',
+    'CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM: "6"',
+    'CONFIG_MBEDTLS_DYNAMIC_BUFFER: y',
+    'nightmatiq_mesh:',
+    'id: nightmatiq_bridge',
+    'extended_diagnostics: true',
+    'id: group_nightmatiq',
+    'sorting_group_id: group_nightmatiq',
+    'max_value: 1500',
+    'return !id(nightmatiq_bridge).mesh_mode_enabled();',
+    'name: "Steinel NightmatIQ Page"',
     'devices:',
     'id: ha_slot_actions_device',
+    'id: nightmatiq_device',
     'id: group_remote_actions',
     'id: remote_button_actions',
     'type: std::array<uint8_t, 160>',
@@ -194,6 +222,8 @@ if text.count("on_raw:") != 1:
     errors.append("RF on_raw must be absent and the single IR on_raw handler must remain")
 if 'name: "ESP-NOW Remote Raw"' in text or "espnow_remote_raw_event" in text:
     errors.append("obsolete shared ESP-NOW event entity is still present")
+if "CONFIG_BLE_MESH_CFG_CLI: y" not in text:
+    errors.append("Bluetooth Mesh Configuration Client must remain enabled for live device identification")
 
 component = root / "esphome" / "components" / "flipper_importer"
 for name in (
@@ -204,10 +234,159 @@ for name in (
         errors.append(f"missing flipper_importer component file: {name}")
 
 importer_source = (component / "flipper_importer.cpp").read_text(encoding="utf-8")
-if "/ar01v3-main-ui.js" in importer_source:
+if "/ar01v3-main-ui.js" in importer_source or "/ar01v3-loader.js" in importer_source:
     errors.append("obsolete custom main-page JavaScript handler is still present")
 if text.count('js_url: ""') != 1:
     errors.append("ESPHome js_url must stay empty while the local frontend is embedded")
+if text.count("js_include: ar01v3_web_v3.js") != 1:
+    errors.append("ESPHome must embed the proven local frontend from release 1.1.2")
+
+nightmatiq = root / "esphome" / "components" / "nightmatiq_mesh"
+for name in (
+    "__init__.py", "nightmatiq_mesh.h", "nightmatiq_mesh.cpp",
+    "nightmatiq_web.cpp", "nightmatiq_page.html", "nightmatiq_page.h",
+):
+    if not (nightmatiq / name).is_file():
+        errors.append(f"missing nightmatiq_mesh component file: {name}")
+
+nightmatiq_header_source = (nightmatiq / "nightmatiq_mesh.h").read_text(encoding="utf-8")
+nightmatiq_python_source = (nightmatiq / "__init__.py").read_text(encoding="utf-8")
+nightmatiq_mesh_source = (nightmatiq / "nightmatiq_mesh.cpp").read_text(encoding="utf-8")
+nightmatiq_web_source = (nightmatiq / "nightmatiq_web.cpp").read_text(encoding="utf-8")
+for marker, source in (
+    ("FLAG_ENABLED", nightmatiq_header_source),
+    ("FLAG_REMOVE_PENDING", nightmatiq_header_source),
+    ("bool mesh_mode_enabled() const", nightmatiq_header_source),
+    ("global_bluetooth_proxy->set_active(false)", nightmatiq_mesh_source),
+    ("global_esp32_ble_tracker->stop_scan()", nightmatiq_mesh_source),
+    ("global_ble->disable()", nightmatiq_mesh_source),
+    ("global_ble->enable()", nightmatiq_mesh_source),
+    ("advance_cloud_job_();", nightmatiq_mesh_source),
+    ("new (std::nothrow) esp_ble_mesh_prov_t", nightmatiq_mesh_source),
+    ("esp_ble_mesh_init(provision, &composition)", nightmatiq_mesh_source),
+    ('url == "/steinel/enable"', nightmatiq_web_source),
+    ('url == "/steinel/disable"', nightmatiq_web_source),
+    ("request->beginResponse", nightmatiq_web_source),
+    ("NIGHTMATIQ_PAGE_GZ", nightmatiq_web_source),
+    ('response->addHeader("Content-Encoding", "gzip")', nightmatiq_web_source),
+    ("save_enabled_(true)", nightmatiq_web_source),
+    ("save_enabled_(false)", nightmatiq_web_source),
+    ("saved configuration preserved", nightmatiq_web_source),
+    ("Configuration removal is already in progress", nightmatiq_web_source),
+    ("FLAG_ENABLED | FLAG_REMOVE_PENDING", nightmatiq_web_source),
+    ("CLOUD_TASK_STACK_BYTES = 8192", nightmatiq_web_source),
+    ("cloud_pending_args_", nightmatiq_web_source),
+    ("Starting cloud task after Bluetooth release", nightmatiq_web_source),
+    ("esp_bt_controller_get_status() == ESP_BT_CONTROLLER_STATUS_IDLE", nightmatiq_web_source),
+    ("esp_bluedroid_get_status() == ESP_BLUEDROID_STATUS_UNINITIALIZED", nightmatiq_web_source),
+    ("cloud_ble_resume_pending_", nightmatiq_web_source),
+    ("cloud_free_after_ble", nightmatiq_web_source),
+    ("largest_internal_block", nightmatiq_web_source),
+    ("http_config.buffer_size = 1024", nightmatiq_web_source),
+    ("http_config.buffer_size_tx = 512", nightmatiq_web_source),
+    ("esp_ota_get_next_update_partition(nullptr)", nightmatiq_web_source),
+    ("esp_partition_write(this->partition", nightmatiq_web_source),
+    ("FlashJsonReader", nightmatiq_web_source),
+    ("cloud_response_bytes", nightmatiq_web_source),
+    ("model_1100", nightmatiq_web_source),
+    ("selected->sensor_element_index", nightmatiq_web_source),
+    ("loaded.onoff_address + 2", nightmatiq_web_source),
+    ("class StatusJsonWriter", nightmatiq_web_source),
+    ("httpd_resp_send_chunk", nightmatiq_web_source),
+    ("USE_NIGHTMATIQ_EXTENDED_DIAGNOSTICS", nightmatiq_web_source),
+    ("status_publish_pending_.store(true)", nightmatiq_web_source),
+    ("status_publish_pending_.exchange(false)", nightmatiq_mesh_source),
+    ('std::strcmp(key, "deviceKey") == 0', nightmatiq_web_source),
+    ("ESP_BLE_MESH_MODEL_OP_COMPOSITION_DATA_GET", nightmatiq_mesh_source),
+    ("live_version_id_", nightmatiq_header_source),
+    ("send_device_revision_catalog_get_", nightmatiq_mesh_source),
+    ("revision_catalog_in_flight_", nightmatiq_header_source),
+    ("ESP_BLE_MESH_MODEL_OP_GEN_ONOFF_GET", nightmatiq_mesh_source),
+    ("ACTUAL_OUTPUT_STALE_MS = 5UL * 60UL * 1000UL", nightmatiq_header_source),
+    ("record_actual_output_", nightmatiq_mesh_source),
+    ("actual_output_binary_sensor_", nightmatiq_header_source),
+    ("force_actual_output_unavailable_", nightmatiq_web_source),
+    ("actual_output_known", nightmatiq_web_source),
+    ("threshold_received", nightmatiq_web_source),
+    ("threshold_centilux", nightmatiq_web_source),
+    ("begin_access_operation_", nightmatiq_mesh_source),
+    ("complete_access_operation_", nightmatiq_mesh_source),
+    ("threshold_set_storage_", nightmatiq_header_source),
+    ("control_request_pending_", nightmatiq_mesh_source),
+    ("this->control_attempt_ < 2", nightmatiq_mesh_source),
+    ("ESP_BLE_MESH_MODEL_OP_LIGHT_LC_MODE_SET_UNACK", nightmatiq_mesh_source),
+    ("ESP_BLE_MESH_MODEL_OP_GEN_ONOFF_SET_UNACK", nightmatiq_mesh_source),
+    ("ESP_BLE_MESH_MODEL_OP_SCENE_RECALL_UNACK", nightmatiq_mesh_source),
+    ("MODE_CONFIRMATION_GRACE_MS", nightmatiq_mesh_source),
+    ("threshold_override_pending_", nightmatiq_mesh_source),
+    ("Rejected invalid NightmatIQ threshold", nightmatiq_mesh_source),
+    ("lux > 1500.0f", nightmatiq_mesh_source),
+    ("centilux <= 150000", nightmatiq_mesh_source),
+    ("STEINEL_COMPANY_ID = 0x0563", nightmatiq_header_source),
+    ("NIGHTMATIQ_PRODUCT_ID = 0x1DCE", nightmatiq_header_source),
+    ("manufacturer.data.size() < 7", nightmatiq_mesh_source),
+    ("esp32_ble_tracker.ESP_BLE_DEVICE_SCHEMA", nightmatiq_python_source),
+    ("await esp32_ble_tracker.register_ble_device(var, config)", nightmatiq_python_source),
+    ("AdvertisementParserType::RAW_ADVERTISEMENTS", nightmatiq_header_source),
+    ("bool NightmatiqMesh::parse_devices", nightmatiq_mesh_source),
+    ("ESP_BLE_AD_MANUFACTURER_SPECIFIC_TYPE", nightmatiq_mesh_source),
+    ("tracker->set_scan_own_address_type(BLE_ADDR_TYPE_RANDOM)", nightmatiq_mesh_source),
+    ("tracker->set_scan_interval(IDENTITY_SCAN_INTERVAL_UNITS)", nightmatiq_mesh_source),
+    ("tracker->start_scan()", nightmatiq_mesh_source),
+    ("tracker->set_scan_own_address_type(BLE_ADDR_TYPE_PUBLIC)", nightmatiq_mesh_source),
+    ("tracker->set_scan_interval(NORMAL_SCAN_INTERVAL_UNITS)", nightmatiq_mesh_source),
+    ("esp_bluedroid_get_status() != ESP_BLUEDROID_STATUS_ENABLED", nightmatiq_mesh_source),
+    ("tracker->set_scan_window(NORMAL_SCAN_WINDOW_UNITS)", nightmatiq_mesh_source),
+    ("tracker->set_scan_duration(NORMAL_SCAN_DURATION_SECONDS)", nightmatiq_mesh_source),
+    ("IDENTITY_SCAN_WINDOW_MS = 30000", nightmatiq_mesh_source),
+    ("COMPOSITION_BACKGROUND_RETRY_MS = 60000", nightmatiq_mesh_source),
+    ("COMPOSITION_REQUEST_WATCHDOG_MS", nightmatiq_mesh_source),
+    ("config_client.model->keys[0] = ESP_BLE_MESH_KEY_DEV", nightmatiq_mesh_source),
+    ("nightmatiq_firmware_version", text),
+    ("nightmatiq_hardware_version", text),
+    ("nightmatiq_actual_output", text),
+    ("nightmatiq_manufacturer", text),
+    ("nightmatiq_company_id", text),
+    ("nightmatiq_product_id", text),
+    ('device_id: nightmatiq_device', text),
+    ('0x%04x (Steinel GmbH)', nightmatiq_mesh_source),
+    (r'\"company_id\":\"%04x\",\"product_id\":\"%04x\"', nightmatiq_web_source),
+    ("static_cast<httpd_req_t *>(*request)", nightmatiq_web_source),
+    ("cv.Optional(CONF_EXTENDED_DIAGNOSTICS, default=True)", nightmatiq_python_source),
+    ('cg.add_define("USE_NIGHTMATIQ_EXTENDED_DIAGNOSTICS")', nightmatiq_python_source),
+):
+    if marker not in source:
+        errors.append(f"missing NightmatIQ unified-mode marker: {marker}")
+if "provision.prov_unicast_addr =" in nightmatiq_mesh_source:
+    errors.append("ESP-IDF const prov_unicast_addr must be initialized, not assigned")
+if "NET_BUF_SIMPLE_DEFINE(value, 3)" in nightmatiq_mesh_source:
+    errors.append("NightmatIQ Light LC SET must not reference a stack-backed property buffer")
+if "std::string NightmatiqMesh::status_json_" in nightmatiq_web_source:
+    errors.append("NightmatIQ status must be streamed without a heap-backed full JSON document")
+if "body.reserve(1536" in nightmatiq_web_source:
+    errors.append("NightmatIQ status must not reserve a large dynamic response buffer")
+onoff_set_block = nightmatiq_mesh_source.split("bool NightmatiqMesh::send_onoff_set_", 1)[1].split(
+    "bool NightmatiqMesh::send_scene_recall_", 1
+)[0]
+if "this->config_.onoff_address" not in onoff_set_block or "this->config_.lc_address" in onoff_set_block:
+    errors.append("NightmatIQ Generic OnOff SET must target the primary OnOff element")
+for obsolete in (
+    "esp_ble_mesh_register_ble_callback", "esp_ble_mesh_start_ble_scanning",
+    "advance_mesh_identity_listener_", "IDENTITY_REFRESH_INTERVAL_MS",
+):
+    if obsolete in nightmatiq_mesh_source:
+        errors.append(f"obsolete passive NightmatIQ identity listener is still present: {obsolete}")
+if 'xTaskCreate(cloud_task_, "steinel_cloud", 12288' in nightmatiq_web_source:
+    errors.append("oversized NightmatIQ cloud task stack is still present")
+if 'static_cast<std::string *>(event->user_data)' in nightmatiq_web_source:
+    errors.append("NightmatIQ cloud responses must not grow an unchecked std::string")
+if "send_json_(request, 200, this->status_json_())" in nightmatiq_web_source:
+    errors.append("NightmatIQ status must not create a second full JSON response copy")
+start_cloud_job_block = nightmatiq_web_source.split("bool NightmatiqMesh::start_cloud_job_", 1)[1].split(
+    "void NightmatiqMesh::advance_cloud_job_", 1
+)[0]
+if "xTaskCreate" in start_cloud_job_block:
+    errors.append("NightmatIQ HTTPS task must be created only after Bluetooth has released memory")
 
 action_select_block = text.split('name: "Action"', 1)[1].split("\n  - platform:", 1)[0]
 if re.search(r"^      - script\.execute: remote_action_refresh_ui$", action_select_block, re.MULTILINE):
@@ -234,11 +413,18 @@ for marker in (
     'G=Di([Rt("esp-entity-table")],G)',
     'name:"ESP-RC01 Button Assignment",sorting_weight:3',
     'name:"Flipper File Import",sorting_weight:4',
-    'name:"IR Signals",sorting_weight:5',
-    'name:"RF 433.92 MHz Signals",sorting_weight:6',
+    'name:"Steinel NightmatIQ Plus",sorting_weight:5',
+    'name:"IR Signals",sorting_weight:6',
+    'name:"RF 433.92 MHz Signals",sorting_weight:7',
     's.name!=="Home Assistant Slot Buttons"',
     'i.name==="Flipper Import Page"',
     'window.location.assign("/flipper")',
+    'i.name==="Steinel NightmatIQ Page"',
+    'window.location.assign("/steinel")',
+    's.device==="Steinel NightmatIQ Plus"&&s.name==="NightmatIQ Status"',
+    'o.name.replace(/^NightmatIQ /,"")',
+    'o.name==="Steinel NightmatIQ Page"?"Configuration Page"',
+    'o.name==="Steinel NightmatIQ Page"||o.name==="NightmatIQ Status"',
     'input[data-field="timings"]',
     'style="display:flex;align-items:center;gap:8px;width:100%"',
     'style="flex:1 1 auto;width:auto;min-width:0"',
@@ -271,6 +457,34 @@ for marker in (
 if len(page_bytes) > 4096:
     errors.append("compressed /flipper page exceeds 4096 bytes")
 
+nightmatiq_header = (nightmatiq / "nightmatiq_page.h").read_text(encoding="utf-8")
+nightmatiq_bytes = bytes(int(value, 16) for value in re.findall(r"0x([0-9a-fA-F]{2})", nightmatiq_header))
+try:
+    nightmatiq_html = gzip.decompress(nightmatiq_bytes).decode("utf-8")
+except Exception as exc:
+    nightmatiq_html = ""
+    errors.append(f"cannot decompress the /steinel page: {exc}")
+for marker in (
+    "Steinel NightmatIQ Plus", "/steinel/discover", "/steinel/install",
+    "/steinel/enable", "/steinel/disable", "Credentials are never saved",
+    "Disabling NightmatIQ keeps the saved configuration",
+    "Twilight threshold", " · Confirmed", "Company ID", "Product ID",
+    "ENABLE NIGHTMATIQ", "DISABLE NIGHTMATIQ", "REMOVE CONFIGURATION",
+):
+    if marker not in nightmatiq_html:
+        errors.append(f"missing /steinel page marker: {marker}")
+if nightmatiq_html and nightmatiq_html != (nightmatiq / "nightmatiq_page.html").read_text(encoding="utf-8"):
+    errors.append("embedded /steinel page differs from nightmatiq_page.html")
+for obsolete in (
+    "Firmware source", "Hardware source", "Composition Version ID",
+    "Live identity authorization", "Live Company ID", "Live Product ID",
+    "confirmed live", "Leave IV Index at 0",
+):
+    if obsolete in nightmatiq_html:
+        errors.append(f"obsolete /steinel page text is still present: {obsolete}")
+if len(nightmatiq_bytes) > 8192:
+    errors.append("compressed /steinel page exceeds 8192 bytes")
+
 secrets_example = (root / "esphome" / "secrets.example.yaml").read_text(encoding="utf-8")
 for marker in ("YOUR_WIFI_SSID", "YOUR_WIFI_PASSWORD", "GENERATED_BY_THE_CONFIGURATION_SCRIPT"):
     if marker not in secrets_example:
@@ -283,10 +497,16 @@ required_files = (
     ".github/workflows/ci.yml", ".github/releases/v1.0.0.md",
     ".github/releases/v1.1.0.md",
     ".github/releases/v1.1.1.md", ".github/releases/v1.1.2.md",
+    ".github/releases/v1.2.0.md",
     "home-assistant/blueprints/automation/envpl/esp_rc01_remote_actions.yaml",
+    "home-assistant/nightmatiq_dashboard_card.yaml",
+    "docs/NIGHTMATIQ.md", "docs/NIGHTMATIQ_PL.md",
     "docs/images/README.md", "docs/images/ar01v3-main-page.png",
     "docs/images/flipper-import-page.png",
-    "docs/images/home-assistant-stored-actions.png", ".gitignore",
+    "docs/images/home-assistant-stored-actions.png",
+    "docs/images/steinel.png", ".gitignore",
+    "scripts/patch_esphome_api.py",
+    "scripts/patch_esphome_ble_tracker.py",
     "examples/princeton_example.sub", "examples/dooya_example.sub",
     "examples/nec_example.ir",
 )
@@ -294,7 +514,22 @@ for relative in required_files:
     if not (root / relative).is_file():
         errors.append(f"missing publication file: {relative}")
 
+if (root / "esphome" / "ar01v3-nightmatiq-experimental.yaml").exists():
+    errors.append("separate NightmatIQ firmware entry point must not exist")
+
+if publication_mode:
+    generated_build_dirs = sorted({
+        path.relative_to(root)
+        for name in (".esphome", "build", "dist")
+        for path in root.rglob(name)
+        if path.is_dir() and not any(part in {".git", "__pycache__"} for part in path.relative_to(root).parts)
+    })
+    for path in generated_build_dirs:
+        errors.append(f"generated build directory found: {path}")
+
 for path in root.rglob("*"):
+    if is_generated(path):
+        continue
     if path.name == ".DS_Store" or path.name.startswith("._"):
         errors.append(f"macOS metadata file found: {path.relative_to(root)}")
 
@@ -306,7 +541,7 @@ private_markers = (
     "YAMAHA ON", "bartoszsupcinski",
 )
 for path in root.rglob("*"):
-    if (not path.is_file() or path.name == "LICENSE" or
+    if (is_generated(path) or not path.is_file() or path.name == "LICENSE" or
             path == root / "scripts" / "00_self_test.sh" or
             path == root / "esphome" / "secrets.yaml"):
         continue
@@ -331,6 +566,80 @@ then
   :
 else
   fail 'source regression checks failed'
+fi
+
+# Exercise the ESPHome API patch against the exact supported upstream snippet,
+# including its idempotent second invocation.
+API_PATCH_TEST="$TMP_DIR/api_overflow_buffer.cpp"
+if python3 - "$API_PATCH_TEST" <<'PY'
+from pathlib import Path
+import sys
+
+Path(sys.argv[1]).write_text(
+    '#include "api_overflow_buffer.h"\n'
+    '#ifdef USE_API\n'
+    '#include <cstring>\n\n'
+    'namespace esphome::api {\n'
+    'bool test(uint16_t buffer_size) {\n'
+    '  // NOLINTNEXTLINE(cppcoreguidelines-owning-memory)\n'
+    '  auto *entry = new Entry{new uint8_t[buffer_size], buffer_size, 0};\n'
+    '  this->queue_[this->tail_] = entry;\n'
+    '}\n}\n'
+    '#endif\n',
+    encoding='utf-8',
+)
+Path(sys.argv[1]).with_suffix('.h').write_text(
+    '#pragma once\n'
+    '#include <array>\n'
+    '#include <cstdint>\n'
+    '#include <sys/types.h>\n'
+    'struct Entry {\n'
+    '  unsigned char *data;\n'
+    '  static void destroy(Entry *entry) {\n'
+    '      delete[] entry->data;\n'
+    '      delete entry;  // NOLINT(cppcoreguidelines-owning-memory)\n'
+    '  }\n'
+    '};\n',
+    encoding='utf-8',
+)
+PY
+  python3 "$ROOT_DIR/scripts/patch_esphome_api.py" --source "$API_PATCH_TEST" >/dev/null \
+  && python3 "$ROOT_DIR/scripts/patch_esphome_api.py" --source "$API_PATCH_TEST" >/dev/null \
+  && grep -Fq 'std::malloc(buffer_size)' "$API_PATCH_TEST" \
+  && grep -Fq 'std::free(entry->data)' "${API_PATCH_TEST%.cpp}.h"; then
+  ok 'ESPHome API low-memory safety patch'
+else
+  fail 'ESPHome API low-memory safety patch failed'
+fi
+
+# Exercise the pinned ESPHome BLE tracker patch and its idempotent second
+# invocation. NightmatIQ needs a random scanner address, while upstream 2026.7.3
+# otherwise hard-codes a public address in start_scan_().
+BLE_PATCH_TEST="$TMP_DIR/esp32_ble_tracker.cpp"
+if python3 - "$BLE_PATCH_TEST" <<'PY'
+from pathlib import Path
+import sys
+
+Path(sys.argv[1]).write_text(
+    'void start_scan() {\n'
+    '  this->scan_params_.own_addr_type = BLE_ADDR_TYPE_PUBLIC;\n'
+    '}\n',
+    encoding='utf-8',
+)
+Path(sys.argv[1]).with_suffix('.h').write_text(
+    '  void set_scan_active(bool scan_active) { scan_active_ = scan_active; }\n'
+    '  ScannerState scanner_state_{ScannerState::IDLE};\n',
+    encoding='utf-8',
+)
+PY
+  python3 "$ROOT_DIR/scripts/patch_esphome_ble_tracker.py" --source "$BLE_PATCH_TEST" >/dev/null \
+  && python3 "$ROOT_DIR/scripts/patch_esphome_ble_tracker.py" --source "$BLE_PATCH_TEST" >/dev/null \
+  && grep -Fq 'this->scan_params_.own_addr_type = this->scan_own_address_type_;' "$BLE_PATCH_TEST" \
+  && grep -Fq 'set_scan_own_address_type(esp_ble_addr_type_t address_type)' "${BLE_PATCH_TEST%.cpp}.h" \
+  && grep -Fq 'scan_own_address_type_{BLE_ADDR_TYPE_PUBLIC}' "${BLE_PATCH_TEST%.cpp}.h"; then
+  ok 'ESPHome BLE scanner address patch'
+else
+  fail 'ESPHome BLE scanner address patch failed'
 fi
 
 # Verify both fallback-AP password paths without creating private files in the repository.
@@ -374,7 +683,9 @@ else
 fi
 
 # Compile parser and component tests when a host C++ compiler is available.
-if command -v g++ >/dev/null 2>&1; then
+if [[ "${AR01V3_SKIP_HOST_COMPILE:-false}" == true ]]; then
+  info 'host C++ compilation skipped by AR01V3_SKIP_HOST_COMPILE'
+elif command -v g++ >/dev/null 2>&1; then
   if g++ -std=c++17 -Wall -Wextra -Werror -pedantic \
       "$ROOT_DIR/tests/test_flipper_parser.cpp" -o "$TMP_DIR/test_flipper_parser" \
       && "$TMP_DIR/test_flipper_parser" \
@@ -417,7 +728,11 @@ root = Path(sys.argv[1])
 for path in (
     root / "esphome/components/Flash_comp/__init__.py",
     root / "esphome/components/flipper_importer/__init__.py",
+    root / "esphome/components/nightmatiq_mesh/__init__.py",
     root / "scripts/generate_flipper_page.py",
+    root / "scripts/generate_nightmatiq_page.py",
+    root / "scripts/patch_esphome_api.py",
+    root / "scripts/patch_esphome_ble_tracker.py",
 ):
     compile(path.read_text(encoding="utf-8"), str(path), "exec")
 print("OK: Python source syntax")

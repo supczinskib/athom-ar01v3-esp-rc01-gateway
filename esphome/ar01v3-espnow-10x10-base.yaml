@@ -6,11 +6,11 @@ substitutions:
   # Allows ESP device to be automatically linked to an 'Area' in Home Assistant. Typically used for areas such as 'Lounge Room', 'Kitchen' etc
   room: ""
   # Description as appears in ESPHome & top of webserver page
-  device_description: "Athom AR01V3 RF/IR bridge with protocol-aware learning, Flipper import, 10x ESP-RC01 reception and HA deduplication"
+  device_description: "Athom AR01V3 RF/IR bridge with protocol-aware learning, Flipper import, 10x ESP-RC01 reception, HA deduplication and optional Steinel NightmatIQ Plus integration"
   # Project Name
   project_name: "envpl.ar01v3_esp_rc01_gateway"
-  # Projection version denotes the release version of the yaml file, allowing checking of deployed vs latest version
-  project_version: "1.1.2"
+  # Project version denotes the release version of the YAML configuration.
+  project_version: "1.2.0"
   # Stable identifier included in events sent to Home Assistant
   receiver_id: "ar01v3_1"
   # Define a domain for this device to use. i.e. iot.home.lan (so device will appear as athom-smart-plug-v2.iot.home.lan in DNS/DHCP logs)
@@ -50,6 +50,8 @@ esphome:
   devices:
     - id: ha_slot_actions_device
       name: "AR01V3 Stored Signal Actions"
+    - id: nightmatiq_device
+      name: "Steinel NightmatIQ Plus"
   name_add_mac_suffix: false
   min_version: 2026.7.3
   project:
@@ -80,6 +82,81 @@ esp32:
       # @grigi found in testing that these options resulted in better responsiveness.
       # BLE 4.2 is supported by ALL ESP32 boards that have bluetooth, the original and derivatives.
       CONFIG_BT_BLE_42_FEATURES_SUPPORTED: y
+      # The same firmware can run either ESPHome Bluetooth Proxy or the
+      # optional Steinel ESP-BLE-MESH client. The selected mode takes effect
+      # after a restart and only one mode actively owns the radio at a time.
+      CONFIG_BT_ENABLED: y
+      CONFIG_BT_BLUEDROID_ENABLED: y
+      CONFIG_BT_NIMBLE_ENABLED: n
+      # The Bluetooth Proxy exposes two connection slots, so two controller
+      # connections preserve that public feature while avoiding ESP-IDF's
+      # unused third 1 KiB static connection allocation.
+      CONFIG_BTDM_CTRL_BLE_MAX_CONN: "2"
+      CONFIG_BTDM_SCAN_DUPL_CACHE_SIZE: "10"
+      CONFIG_BTDM_MESH_DUPL_SCAN_CACHE_SIZE: "10"
+      CONFIG_BTDM_BLE_ADV_REPORT_FLOW_CTRL_NUM: "50"
+      # Keep Bluetooth environment objects on the heap so a controlled BLE
+      # shutdown can actually return their memory to the HTTPS operation.
+      CONFIG_BT_BLE_DYNAMIC_ENV_MEMORY: y
+      CONFIG_BLE_MESH: y
+      CONFIG_BLE_MESH_PROVISIONER: y
+      CONFIG_BLE_MESH_SETTINGS: y
+      CONFIG_BLE_MESH_PB_ADV: y
+      # Retain ordinary BLE advertisement support in the Mesh scanner.
+      CONFIG_BLE_MESH_SUPPORT_BLE_SCAN: y
+      # Size Mesh queues for a small residential network. ESP-IDF defaults to
+      # much larger provisioner buffers, which leave too little heap for the
+      # authenticated web server on the original ESP32 without PSRAM.
+      CONFIG_BLE_MESH_ADV_BUF_COUNT: "6"
+      CONFIG_BLE_MESH_CRPL: "3"
+      CONFIG_BLE_MESH_MSG_CACHE_SIZE: "2"
+      CONFIG_BLE_MESH_WAIT_FOR_PROV_MAX_DEV_NUM: "1"
+      CONFIG_BLE_MESH_MAX_PROV_NODES: "1"
+      CONFIG_BLE_MESH_PBA_SAME_TIME: "1"
+      CONFIG_BLE_MESH_PROVISIONER_SUBNET_COUNT: "1"
+      CONFIG_BLE_MESH_PROVISIONER_APP_KEY_COUNT: "1"
+      CONFIG_BLE_MESH_SUBNET_COUNT: "1"
+      CONFIG_BLE_MESH_APP_KEY_COUNT: "1"
+      CONFIG_BLE_MESH_MODEL_KEY_COUNT: "1"
+      CONFIG_BLE_MESH_MODEL_GROUP_COUNT: "1"
+      # ESP-IDF declares a fixed label table; zero creates non-standard
+      # zero-length arrays and two compiler warnings in cfg_srv.c.
+      CONFIG_BLE_MESH_LABEL_COUNT: "1"
+      # Required for authenticated Composition Data reads using the target
+      # node's DeviceKey (live manufacturer/product/version identifiers).
+      CONFIG_BLE_MESH_CFG_CLI: y
+      CONFIG_BLE_MESH_GENERIC_ONOFF_CLI: y
+      CONFIG_BLE_MESH_SENSOR_CLI: y
+      CONFIG_BLE_MESH_SCENE_CLI: y
+      CONFIG_BLE_MESH_LIGHT_LC_CLI: y
+      # This component is a provisioner/client over the advertising bearer. It
+      # exposes neither a Mesh Health Server nor the Mesh GATT Proxy protocol.
+      CONFIG_BLE_MESH_HEALTH_SRV: n
+      CONFIG_BLE_MESH_PROXY: n
+      CONFIG_BLE_MESH_TX_SEG_MSG_COUNT: "1"
+      CONFIG_BLE_MESH_RX_SEG_MSG_COUNT: "1"
+      # NightmatIQ Composition Data is about 90 bytes (28 models in three
+      # elements), so a 64-byte SDU silently times out before the live
+      # CID/PID/VID response reaches the configuration client.
+      CONFIG_BLE_MESH_RX_SDU_MAX: "128"
+      CONFIG_BLE_MESH_TX_SEG_MAX: "3"
+      # Keep the Wi-Fi AMPDU receive window fully covered (six static RX
+      # buffers), but cap burst buffers that otherwise consume the last heap
+      # while Mesh, API and the authenticated web server are active together.
+      CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM: "6"
+      CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM: "16"
+      CONFIG_ESP_WIFI_DYNAMIC_TX_BUFFER_NUM: "16"
+      CONFIG_ESP_WIFI_MGMT_SBUF_NUM: "6"
+      CONFIG_MBEDTLS_CERTIFICATE_BUNDLE: y
+      CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_FULL: y
+      # Allocate TLS RX/TX records only while they are used. Keep the full
+      # 16 KiB incoming-record limit for compatibility with arbitrary servers.
+      CONFIG_MBEDTLS_DYNAMIC_BUFFER: y
+      # Every Steinel Cloud attempt owns a fresh TLS client. Release handshake
+      # key material and the verified CA immediately after use so the streamed
+      # response and its parser retain a larger contiguous internal heap block.
+      CONFIG_MBEDTLS_DYNAMIC_FREE_CONFIG_DATA: y
+      CONFIG_MBEDTLS_DYNAMIC_FREE_CA_CERT: y
       # Extend the watchdog timeout, so the device reboots if the device appears locked up for over 10 seconds.
       CONFIG_ESP_TASK_WDT_TIMEOUT_S: "10"
 
@@ -395,8 +472,43 @@ flipper_importer:
     - rf_slot_status_14
     - rf_slot_status_15
 
+# Optional Steinel NightmatIQ Plus integration. The component is always present
+# in the unified firmware; its authenticated /steinel page controls whether the
+# next boot uses Bluetooth Mesh or the normal Bluetooth Proxy.
+nightmatiq_mesh:
+  id: nightmatiq_bridge
+  # Detailed Mesh/heap counters are included by default. Set this to false
+  # for a smaller production build without the expandable web diagnostics.
+  extended_diagnostics: true
+  lux_sensor_id: nightmatiq_lux
+  threshold_number_id: nightmatiq_threshold
+  mode_select_id: nightmatiq_mode
+  ready_binary_sensor_id: nightmatiq_mesh_ready
+  actual_output_binary_sensor_id: nightmatiq_actual_output
+  status_text_sensor_id: nightmatiq_status
+  firmware_version_text_sensor_id: nightmatiq_firmware_version
+  hardware_version_sensor_id: nightmatiq_hardware_version
+  manufacturer_text_sensor_id: nightmatiq_manufacturer
+  company_id_text_sensor_id: nightmatiq_company_id
+  product_id_text_sensor_id: nightmatiq_product_id
+  web_username: !secret web_server_username
+  web_password: !secret web_server_password
+  update_interval: 30s
+
 api:
   reboot_timeout: 0s
+  # Keep enough capacity for Home Assistant and one maintenance client while
+  # preventing several simultaneous API sessions from exhausting the small
+  # internal heap shared with Bluetooth Mesh.
+  max_connections: 2
+  listen_backlog: 1
+  # Entity discovery briefly produces more data than the TCP socket can accept.
+  # Keep at most one dynamically allocated overflow frame: if the client stops
+  # draining data, ESPHome disconnects it cleanly instead of allocating until
+  # the ESP32 aborts. A longer batch interval lets the socket drain between the
+  # large discovery batches without removing any Home Assistant entities.
+  max_send_queue: 1
+  batch_delay: 500ms
   actions:
     # Fire-and-forget variants intentionally have no response mode. Home
     # Assistant presents their scalar variables as an editable action form.
@@ -599,8 +711,12 @@ api:
         condition:
           api.connected:
         then:
-          - esp32_ble_tracker.start_scan:
-              continuous: true
+          - if:
+              condition:
+                lambda: 'return !id(nightmatiq_bridge).mesh_mode_enabled();'
+              then:
+                - esp32_ble_tracker.start_scan:
+                    continuous: true
   # Disable BLE tracking when there are no api connections live
   on_client_disconnected:
     if:
@@ -608,7 +724,11 @@ api:
         not:
           api.connected:
       then:
-        - esp32_ble_tracker.stop_scan:
+        - if:
+            condition:
+              lambda: 'return !id(nightmatiq_bridge).mesh_mode_enabled();'
+            then:
+              - esp32_ble_tracker.stop_scan:
 
 ota:
   - platform: esphome
@@ -625,12 +745,7 @@ mdns:
 web_server:
   port: 80
   version: 3
-  # Use ESPHome's built-in, authenticated /0.js handler. The earlier custom
-  # handler could close the connection without sending the helper body.
-  # Keep a versioned resource name. ESPHome's generated-source cache does not
-  # reliably invalidate an embedded js_include when only its contents change.
-  # Use one complete local frontend. Its entity table contains the firmware's
-  # sorting groups directly, so rendering does not depend on SSE listener order.
+  # Serve the embedded local frontend without an external JavaScript service.
   js_url: ""
   js_include: ar01v3_web_v3.js
   # Pilot/Button/Action are local web controls. Keep them off the native API
@@ -643,12 +758,15 @@ web_server:
     - id: group_signal_import
       name: "Flipper File Import"
       sorting_weight: 4
+    - id: group_nightmatiq
+      name: "Steinel NightmatIQ Plus"
+      sorting_weight: 5
     - id: group_ir_signals
       name: "IR Signals"
-      sorting_weight: 5
+      sorting_weight: 6
     - id: group_rf_signals
       name: "RF 433.92 MHz Signals"
-      sorting_weight: 6
+      sorting_weight: 7
     - id: group_ha_slot_actions
       name: "Home Assistant Slot Buttons"
       sorting_weight: 90
@@ -1089,7 +1207,7 @@ external_components:
   - source:
       type: local
       path: components
-    components: [Flash_comp, flipper_importer]
+    components: [Flash_comp, flipper_importer, nightmatiq_mesh]
 
 remote_receiver:
   - pin:
@@ -1099,6 +1217,9 @@ remote_receiver:
     # after ESPHome has decoded a fixed-code RC-Switch frame; ambient RAW chatter
     # is never written to a slot.
     dump: rc_switch
+    # The ESP32 default is 10 kB per receiver. Four kB still buffers several
+    # complete RMT events while returning 6 kB of internal heap to the gateway.
+    buffer_size: 4kb
     filter: 50us
     idle: 10ms
     tolerance: 50%
@@ -1145,6 +1266,9 @@ remote_receiver:
       number: ${IR_RX_PIN}
       inverted: true
     dump: all
+    # Keep the same conservative queue depth for long IR/RAW frames without
+    # reserving ESPHome's oversized 10 kB default buffer.
+    buffer_size: 4kb
     tolerance: 25%
     idle: 65500us
     clock_resolution: "500000"
@@ -1218,6 +1342,20 @@ climate:
     receiver_id: ir_receiver
 
 binary_sensor:
+  - platform: template
+    id: nightmatiq_mesh_ready
+    name: "NightmatIQ Mesh Ready"
+    entity_category: diagnostic
+    device_id: nightmatiq_device
+    web_server: {sorting_group_id: group_nightmatiq, sorting_weight: 70}
+
+  - platform: template
+    id: nightmatiq_actual_output
+    name: "NightmatIQ Actual Light Output"
+    icon: mdi:lightbulb
+    device_id: nightmatiq_device
+    web_server: {sorting_group_id: group_nightmatiq, sorting_weight: 10}
+
   - platform: status
     name: "Status"
     entity_category: "diagnostic"
@@ -1237,6 +1375,26 @@ binary_sensor:
           - button.press: Reset
 
 sensor:
+  - platform: template
+    id: nightmatiq_hardware_version
+    name: "NightmatIQ Hardware Revision"
+    accuracy_decimals: 0
+    update_interval: never
+    entity_category: diagnostic
+    device_id: nightmatiq_device
+    web_server: {sorting_group_id: group_nightmatiq, sorting_weight: 81}
+
+  - platform: template
+    id: nightmatiq_lux
+    name: "NightmatIQ Illuminance"
+    device_class: illuminance
+    state_class: measurement
+    unit_of_measurement: lx
+    accuracy_decimals: 2
+    update_interval: never
+    device_id: nightmatiq_device
+    web_server: {sorting_group_id: group_nightmatiq, sorting_weight: 20}
+
   - platform: uptime
     name: "Uptime Sensor"
     id: uptime_sensor
@@ -1366,6 +1524,23 @@ sensor:
     entity_category: diagnostic
 
 button:
+  - platform: template
+    name: "Steinel NightmatIQ Page"
+    icon: mdi:bluetooth-settings
+    internal: true
+    web_server: {sorting_group_id: group_nightmatiq, sorting_weight: 50}
+    on_press:
+      - lambda: 'return;'
+
+  - platform: template
+    name: "NightmatIQ Refresh"
+    icon: mdi:refresh
+    entity_category: diagnostic
+    device_id: nightmatiq_device
+    web_server: {sorting_group_id: group_nightmatiq, sorting_weight: 60}
+    on_press:
+      - lambda: 'id(nightmatiq_bridge).request_refresh();'
+
   - platform: template
     name: "Flipper Import Page"
     id: flipper_import_button
@@ -1977,6 +2152,46 @@ event:
     event_types: *espnow_button_event_types
 
 text_sensor:
+  - platform: template
+    id: nightmatiq_firmware_version
+    name: "NightmatIQ Installed Firmware"
+    icon: mdi:chip
+    entity_category: diagnostic
+    device_id: nightmatiq_device
+    web_server: {sorting_group_id: group_nightmatiq, sorting_weight: 80}
+
+  - platform: template
+    id: nightmatiq_manufacturer
+    name: "NightmatIQ Manufacturer"
+    icon: mdi:factory
+    entity_category: diagnostic
+    device_id: nightmatiq_device
+    web_server: {sorting_group_id: group_nightmatiq, sorting_weight: 82}
+
+  - platform: template
+    id: nightmatiq_company_id
+    name: "NightmatIQ Company ID"
+    icon: mdi:identifier
+    entity_category: diagnostic
+    device_id: nightmatiq_device
+    web_server: {sorting_group_id: group_nightmatiq, sorting_weight: 83}
+
+  - platform: template
+    id: nightmatiq_product_id
+    name: "NightmatIQ Product ID"
+    icon: mdi:identifier
+    entity_category: diagnostic
+    device_id: nightmatiq_device
+    web_server: {sorting_group_id: group_nightmatiq, sorting_weight: 84}
+
+  - platform: template
+    id: nightmatiq_status
+    name: "NightmatIQ Status"
+    icon: mdi:bluetooth-connect
+    entity_category: diagnostic
+    device_id: nightmatiq_device
+    web_server: {sorting_group_id: group_nightmatiq, sorting_weight: 1}
+
   - platform: wifi_info
     ip_address:
       name: "IP Address"
@@ -2286,6 +2501,19 @@ text_sensor:
 # Keep the mapping identical on every AR01V3: the same physical remote must always use the same slot.
 select:
   - platform: template
+    id: nightmatiq_mode
+    name: "NightmatIQ Mode"
+    icon: mdi:theme-light-dark
+    device_id: nightmatiq_device
+    web_server: {sorting_group_id: group_nightmatiq, sorting_weight: 30}
+    options:
+      - "Auto"
+      - "Always On"
+      - "Always Off"
+    set_action:
+      - lambda: 'id(nightmatiq_bridge).set_mode(x);'
+
+  - platform: template
     name: "Pilot"
     id: remote_action_pilot_select
     icon: mdi:remote
@@ -2509,6 +2737,20 @@ select:
           ESP_LOGI("RF_LEARNING", "Selected slot: %d", id(rf_signal_select_index));
 
 number:
+  - platform: template
+    id: nightmatiq_threshold
+    name: "NightmatIQ Twilight Threshold"
+    icon: mdi:brightness-6
+    device_id: nightmatiq_device
+    web_server: {sorting_group_id: group_nightmatiq, sorting_weight: 40}
+    unit_of_measurement: lx
+    min_value: 1
+    max_value: 1500
+    step: 1
+    mode: slider
+    set_action:
+      - lambda: 'id(nightmatiq_bridge).set_threshold(x);'
+
   - platform: template
     name: "RF Repeat Count"
     id: rf_repeat_count

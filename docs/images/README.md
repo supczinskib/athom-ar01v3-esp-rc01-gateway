@@ -7,6 +7,7 @@ Published files:
 - `ar01v3-main-page.png`
 - `flipper-import-page.png`
 - `home-assistant-stored-actions.png`
+- `steinel.png`
 
 Before replacing an image, review all visible content and confirm that the project author approves it for publication, including any:
 

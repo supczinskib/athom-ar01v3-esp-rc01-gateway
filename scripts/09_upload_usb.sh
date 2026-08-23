@@ -8,6 +8,7 @@ N="$(normalize_device_number "$1")"
 PORT="$2"
 [[ -e "$PORT" ]] || { echo "Serial port does not exist: $PORT"; exit 1; }
 ESPHOME_BIN="$(find_esphome)"
+patch_esphome_api "$ESPHOME_BIN"
 require_secrets "$ROOT_DIR"
 cd "$ROOT_DIR/esphome"
 "$ESPHOME_BIN" clean "ar01v3-$N.yaml"
