@@ -10,7 +10,7 @@ substitutions:
   # Project Name
   project_name: "envpl.ar01v3_esp_rc01_gateway"
   # Project version denotes the release version of the YAML configuration.
-  project_version: "1.2.0"
+  project_version: "1.2.1"
   # Stable identifier included in events sent to Home Assistant
   receiver_id: "ar01v3_1"
   # Define a domain for this device to use. i.e. iot.home.lan (so device will appear as athom-smart-plug-v2.iot.home.lan in DNS/DHCP logs)
@@ -481,6 +481,7 @@ nightmatiq_mesh:
   # for a smaller production build without the expandable web diagnostics.
   extended_diagnostics: true
   lux_sensor_id: nightmatiq_lux
+  rssi_sensor_id: nightmatiq_rssi
   threshold_number_id: nightmatiq_threshold
   mode_select_id: nightmatiq_mode
   ready_binary_sensor_id: nightmatiq_mesh_ready
@@ -503,11 +504,11 @@ api:
   max_connections: 2
   listen_backlog: 1
   # Entity discovery briefly produces more data than the TCP socket can accept.
-  # Keep at most one dynamically allocated overflow frame: if the client stops
-  # draining data, ESPHome disconnects it cleanly instead of allocating until
-  # the ESP32 aborts. A longer batch interval lets the socket drain between the
-  # large discovery batches without removing any Home Assistant entities.
-  max_send_queue: 1
+  # Use ESPHome's normal ESP32 queue depth so the initial publication of all
+  # entities cannot disconnect Home Assistant after the first queued frame.
+  # Entries are allocated only while TCP is backlogged; the patched allocator
+  # still closes a genuinely congested client cleanly if RAM is exhausted.
+  max_send_queue: 8
   batch_delay: 500ms
   actions:
     # Fire-and-forget variants intentionally have no response mode. Home
@@ -1375,6 +1376,18 @@ binary_sensor:
           - button.press: Reset
 
 sensor:
+  - platform: template
+    id: nightmatiq_rssi
+    name: "NightmatIQ Signal Strength"
+    device_class: signal_strength
+    state_class: measurement
+    unit_of_measurement: dBm
+    accuracy_decimals: 0
+    update_interval: never
+    entity_category: diagnostic
+    device_id: nightmatiq_device
+    web_server: {sorting_group_id: group_nightmatiq, sorting_weight: 85}
+
   - platform: template
     id: nightmatiq_hardware_version
     name: "NightmatIQ Hardware Revision"
@@ -2506,6 +2519,9 @@ select:
     icon: mdi:theme-light-dark
     device_id: nightmatiq_device
     web_server: {sorting_group_id: group_nightmatiq, sorting_weight: 30}
+    optimistic: true
+    restore_value: true
+    initial_option: "Auto"
     options:
       - "Auto"
       - "Always On"

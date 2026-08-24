@@ -34,6 +34,8 @@ namespace esphome::nightmatiq_mesh {
 static const char *const WEB_TAG = "nightmatiq_web";
 static const char *const API_BASE = "https://connectapp.steinel.de/api";
 static constexpr uint32_t CLOUD_TASK_STACK_BYTES = 8192;
+static constexpr uint32_t CLOUD_ERROR_REBOOT_DELAY_MS = 20000;
+static constexpr uint32_t CLOUD_DISCOVER_SESSION_TIMEOUT_MS = 300000;
 
 #ifdef USE_NIGHTMATIQ_EXTENDED_DIAGNOSTICS
 static const char *reset_reason_name(esp_reset_reason_t reason) {
@@ -499,7 +501,9 @@ struct BackupSummary {
   size_t app_key_count{0};
   size_t net_key_count{0};
   size_t node_info_count{0};
-  uint16_t high_address{0x7FFF};
+  uint16_t low_address{0};
+  uint16_t high_address{0};
+  bool unicast_range_valid{false};
   bool mesh_uuid_valid{false};
   std::array<uint8_t, 16> mesh_uuid{};
   char mesh_name[48]{};
@@ -643,14 +647,29 @@ bool read_steinel(FlashJsonReader &reader, BackupSummary &summary) {
 }
 
 bool read_unicast_range(FlashJsonReader &reader, BackupSummary &summary) {
-  return read_object(reader, [&](const char *key) {
-    if (std::strcmp(key, "highAddress") != 0) return reader.skip_value();
+  bool low_seen = false;
+  bool high_seen = false;
+  const bool ok = read_object(reader, [&](const char *key) {
+    if (std::strcmp(key, "lowAddress") != 0 && std::strcmp(key, "highAddress") != 0)
+      return reader.skip_value();
     char address[12]{};
     if (!reader.read_string(address, sizeof(address))) return false;
     uint16_t parsed = 0;
-    if (parse_hex_address(address, parsed)) summary.high_address = parsed;
+    if (!parse_hex_address(address, parsed)) return false;
+    if (std::strcmp(key, "lowAddress") == 0) {
+      summary.low_address = parsed;
+      low_seen = true;
+    } else {
+      summary.high_address = parsed;
+      high_seen = true;
+    }
     return true;
   });
+  summary.unicast_range_valid = ok && low_seen && high_seen &&
+                                summary.low_address > 0 &&
+                                summary.low_address <= summary.high_address &&
+                                summary.high_address < 0x8000;
+  return ok;
 }
 
 bool read_provisioner(FlashJsonReader &reader, BackupSummary &summary) {
@@ -771,6 +790,107 @@ void NightmatiqMesh::retire_local_address_() {
   } else {
     ESP_LOGW(WEB_TAG, "Could not persist retired Mesh address 0x%04X", stored.address);
   }
+}
+
+bool NightmatiqMesh::load_address_policy_() {
+  StoredAddressPolicy stored{};
+  if (!this->address_policy_preference_.load(&stored) ||
+      stored.magic != ADDRESS_POLICY_MAGIC ||
+      stored.version != ADDRESS_POLICY_VERSION || stored.pool_low == 0 ||
+      stored.pool_low > stored.pool_high || stored.pool_high > 0x7FFE ||
+      stored.initial_address < stored.pool_low ||
+      stored.initial_address > stored.pool_high ||
+      stored.current_address < stored.pool_low ||
+      stored.current_address > stored.pool_high ||
+      stored.automatic_rotations > AUTO_ADDRESS_ROTATION_LIMIT ||
+      (stored.flags & static_cast<uint16_t>(~ADDRESS_POLICY_FLAG_VERIFIED)) != 0 ||
+      stored.installation_nonce == 0 ||
+      std::all_of(stored.mesh_uuid.begin(), stored.mesh_uuid.end(),
+                  [](uint8_t value) { return value == 0; })) {
+    this->address_policy_ = StoredAddressPolicy{};
+    this->address_policy_valid_ = false;
+    return false;
+  }
+  this->address_policy_ = stored;
+  this->address_policy_valid_ = true;
+  return true;
+}
+
+bool NightmatiqMesh::save_address_policy_(const StoredAddressPolicy &policy) {
+  if (!this->address_policy_preference_.save(&policy))
+    return false;
+  this->address_policy_ = policy;
+  this->address_policy_valid_ = true;
+  return true;
+}
+
+bool NightmatiqMesh::select_next_local_address_(uint16_t &address) const {
+  if (!this->address_policy_valid_ ||
+      this->address_policy_.pool_low >= this->address_policy_.pool_high)
+    return false;
+  const uint16_t first = this->address_policy_.pool_low;
+  const uint16_t last = this->address_policy_.pool_high;
+  const uint16_t current = this->address_policy_.current_address;
+  const uint16_t candidate = current <= first ? last : static_cast<uint16_t>(current - 1);
+  if (candidate == current)
+    return false;
+  address = candidate;
+  return true;
+}
+
+bool NightmatiqMesh::rotate_local_address_(std::string &error) {
+  if (!this->configured_ || !this->address_policy_valid_ ||
+      this->address_policy_.mesh_uuid != this->config_.mesh_uuid ||
+      this->address_policy_.current_address != this->config_.local_address) {
+    error = "No saved address pool is available; remove and import the network again";
+    return false;
+  }
+  if ((this->address_policy_.flags & ADDRESS_POLICY_FLAG_VERIFIED) != 0) {
+    error = "The current local Mesh address was already verified";
+    return false;
+  }
+  if (this->address_policy_.automatic_rotations >= AUTO_ADDRESS_ROTATION_LIMIT) {
+    error = "Automatic Mesh address recovery reached its safety limit";
+    return false;
+  }
+
+  uint16_t replacement = 0;
+  if (!this->select_next_local_address_(replacement)) {
+    error = "No unused local Mesh address remains in the saved pool";
+    return false;
+  }
+
+  const uint16_t previous = this->config_.local_address;
+  const StoredAddressPolicy previous_policy = this->address_policy_;
+  StoredAddressPolicy updated_policy = previous_policy;
+  updated_policy.current_address = replacement;
+  updated_policy.automatic_rotations++;
+  updated_policy.flags &= static_cast<uint16_t>(~ADDRESS_POLICY_FLAG_VERIFIED);
+  if (!this->save_address_policy_(updated_policy)) {
+    error = "Could not save the replacement Mesh address policy";
+    return false;
+  }
+
+  // Preserve the old address outside the ESP-BLE-MESH namespace before the
+  // active configuration is updated. If the second NVS write fails, roll the
+  // policy back and continue using the unchanged active address.
+  this->retire_local_address_();
+  StoredConfig updated_config = this->config_;
+  updated_config.local_address = replacement;
+  if (!this->save_config_(updated_config)) {
+    if (!this->save_address_policy_(previous_policy))
+      ESP_LOGE(WEB_TAG, "Could not roll back the Mesh address policy after a configuration write failure");
+    error = "Could not save the replacement Mesh address";
+    return false;
+  }
+
+  ESP_LOGW(WEB_TAG,
+           "Automatically rotating local Mesh address 0x%04X -> 0x%04X while preserving keys and Mesh settings",
+           previous, replacement);
+  this->set_status_("No Mesh response; trying another local address");
+  this->reboot_at_ = millis() + 1500;
+  this->reboot_pending_.store(true);
+  return true;
 }
 
 bool NightmatiqMesh::load_cached_iv_index_(const std::array<uint8_t, 16> &mesh_uuid,
@@ -962,6 +1082,12 @@ void NightmatiqMesh::handle_status_(AsyncWebServerRequest *request) {
   body.signed_number(",\"mesh_last_tx_error\":", this->mesh_last_tx_error_.load());
   body.number(",\"mesh_rx_messages\":", this->mesh_rx_messages_.load());
   body.number(",\"mesh_timeouts\":", this->mesh_timeouts_.load());
+  body.append(",\"mesh_rssi_received\":");
+  body.append(this->mesh_rssi_received_.load() ? "true" : "false");
+  body.signed_number(",\"mesh_last_rssi_dbm\":", this->last_mesh_rssi_dbm_.load());
+  const uint32_t mesh_rssi_at = this->last_mesh_rssi_at_.load();
+  body.number(",\"mesh_last_rssi_age_seconds\":",
+              mesh_rssi_at == 0 ? 0 : (millis() - mesh_rssi_at) / 1000U);
   body.append(",\"lux_received\":");
   body.append(this->lux_received_.load() ? "true" : "false");
   body.number(",\"last_lux_centilux\":", this->pending_lux_centilux_.load());
@@ -1060,6 +1186,10 @@ bool NightmatiqMesh::is_safe_uuid_(const std::string &value) {
 
 void NightmatiqMesh::handle_discover_(AsyncWebServerRequest *request) {
   if (this->cloud_busy_.load()) return send_json_(request, 409, "{\"message\":\"Another cloud request is running\"}");
+  if (this->mesh_mode_enabled_)
+    return send_json_(request, 409, "{\"message\":\"Disable or remove NightmatIQ before cloud setup\"}");
+  if (this->reboot_pending_.load())
+    return send_json_(request, 409, "{\"message\":\"Gateway restart is pending\"}");
   const std::string email = request->arg("email").c_str();
   const std::string password = request->arg("password").c_str();
   if (email.empty() || password.empty()) return send_json_(request, 400, "{\"message\":\"Email and password are required\"}");
@@ -1072,6 +1202,8 @@ void NightmatiqMesh::handle_discover_(AsyncWebServerRequest *request) {
 
 void NightmatiqMesh::handle_install_(AsyncWebServerRequest *request) {
   if (this->cloud_busy_.load()) return send_json_(request, 409, "{\"message\":\"Another cloud request is running\"}");
+  if (this->reboot_pending_.load())
+    return send_json_(request, 409, "{\"message\":\"Gateway restart is pending\"}");
   if (this->configured_)
     return send_json_(request, 409, "{\"message\":\"Remove the current NightmatIQ configuration first\"}");
   const std::string email = request->arg("email").c_str();
@@ -1135,13 +1267,13 @@ void NightmatiqMesh::handle_remove_(AsyncWebServerRequest *request) {
       return send_json_(request, 500, "{\"message\":\"Could not erase Bluetooth Mesh settings\"}");
     }
     this->clear_config_();
-    this->cloud_ble_resume_pending_.store(true);
-    this->set_status_("Configuration removed; Bluetooth Proxy active");
+    this->set_status_("Configuration removed; rebooting into Bluetooth Proxy mode");
   } else {
     this->clear_config_();
-    this->cloud_ble_resume_pending_.store(true);
-    this->set_status_("No NightmatIQ configuration; Bluetooth Proxy active");
+    this->set_status_("No NightmatIQ configuration; rebooting into Bluetooth Proxy mode");
   }
+  this->reboot_at_ = millis() + 1500;
+  this->reboot_pending_.store(true);
   send_json_(request, 200, "{\"message\":\"NightmatIQ configuration removed\"}");
 }
 
@@ -1195,12 +1327,14 @@ bool NightmatiqMesh::cloud_get_(const std::string &path, const std::string &emai
     result = esp_http_client_perform(client);
     http_status = esp_http_client_get_status_code(client);
     esp_http_client_cleanup(client);
-    if (result != ESP_ERR_HTTP_INCOMPLETE_DATA || attempt == MAX_ATTEMPTS || body.sink_error != ESP_OK) break;
+    const bool retryable_transport_error =
+        result == ESP_ERR_HTTP_INCOMPLETE_DATA || (result != ESP_OK && http_status <= 0);
+    if (!retryable_transport_error || attempt == MAX_ATTEMPTS || body.sink_error != ESP_OK) break;
 
-    ESP_LOGW(WEB_TAG, "Incomplete Steinel response after %u bytes; retrying once with a fresh HTTPS connection",
-             static_cast<unsigned>(body.length));
+    ESP_LOGW(WEB_TAG, "Steinel HTTPS transport error %s after %u bytes; retrying once with a fresh connection",
+             esp_err_to_name(result), static_cast<unsigned>(body.length));
     body.reset_for_retry();
-    vTaskDelay(pdMS_TO_TICKS(250));
+    vTaskDelay(pdMS_TO_TICKS(500));
   }
   std::fill(credentials.begin(), credentials.end(), '\0');
   std::fill(authorization.begin(), authorization.end(), '\0');
@@ -1259,7 +1393,8 @@ bool NightmatiqMesh::discover_networks_(const std::string &email, const std::str
 
 bool NightmatiqMesh::parse_backup_(const CloudBody &body, uint32_t requested_iv_index,
                                    uint16_t requested_node_address, StoredConfig &config,
-                                   std::array<uint8_t, 16> &device_key, std::string &error) {
+                                   std::array<uint8_t, 16> &device_key,
+                                   StoredAddressPolicy &address_policy, std::string &error) {
   if (!body.use_flash || body.partition == nullptr || body.length == 0) {
     error = "Network backup workspace is not available";
     return false;
@@ -1370,33 +1505,91 @@ bool NightmatiqMesh::parse_backup_(const CloudBody &body, uint32_t requested_iv_
   }
   config.net_key = net->key;
 
-  const uint16_t highest_local_address = std::min<uint16_t>(summary->high_address, 0x7FFE);
-  // Move monotonically down through the provisioner's allocated range after a
-  // local Mesh reset. Reusing any older source address with a reset sequence
-  // number may be rejected by peers' Replay Protection Lists. Starting below
-  // the most recently retired address also prevents alternating between the
-  // top two addresses on repeated remove/import cycles.
-  config.local_address =
-      this->retired_local_address_ > 1 && this->retired_local_address_ <= highest_local_address
-          ? static_cast<uint16_t>(this->retired_local_address_ - 1)
-          : highest_local_address;
-  while (config.local_address > 0) {
-    const BackupNode *collision = nullptr;
-    for (size_t index = 0; index < summary->node_count; index++) {
-      const BackupNode &node = summary->nodes[index];
-      if (!node.address_valid) continue;
-      const uint32_t last = static_cast<uint32_t>(node.address) + std::max<uint16_t>(1, node.element_count) - 1;
-      if (config.local_address >= node.address && config.local_address <= std::min<uint32_t>(last, 0x7FFF)) {
-        collision = &node;
-        break;
-      }
-    }
-    if (collision == nullptr) break;
-    if (collision->address <= 1) { config.local_address = 0; break; }
-    config.local_address = collision->address - 1;
+  if (!summary->unicast_range_valid) {
+    error = "Backup has no valid provisioner unicast range";
+    delete summary;
+    return false;
   }
+
+  const uint16_t pool_high = std::min<uint16_t>(summary->high_address, 0x7FFE);
+  uint32_t highest_occupied = static_cast<uint32_t>(summary->low_address) - 1;
+  for (size_t index = 0; index < summary->node_count; index++) {
+    const BackupNode &node = summary->nodes[index];
+    if (!node.address_valid)
+      continue;
+    const uint32_t node_last = std::min<uint32_t>(
+        static_cast<uint32_t>(node.address) + std::max<uint16_t>(1, node.element_count) - 1,
+        0x7FFF);
+    if (node.address <= summary->high_address && node_last >= summary->low_address)
+      highest_occupied = std::max<uint32_t>(
+          highest_occupied, std::min<uint32_t>(node_last, summary->high_address));
+  }
+
+  const uint16_t bounded_pool_low =
+      pool_high >= ADDRESS_POOL_TARGET_SIZE
+          ? static_cast<uint16_t>(pool_high - ADDRESS_POOL_TARGET_SIZE + 1)
+          : summary->low_address;
+  const uint32_t first_free = highest_occupied + 1;
+  const uint16_t pool_low = static_cast<uint16_t>(
+      std::max<uint32_t>(summary->low_address,
+                         std::max<uint32_t>(bounded_pool_low, first_free)));
+  if (pool_low > pool_high) {
+    error = "Provisioner range has no safe local Mesh address pool";
+    delete summary;
+    return false;
+  }
+
+  address_policy = StoredAddressPolicy{};
+  address_policy.pool_low = pool_low;
+  address_policy.pool_high = pool_high;
+  address_policy.mesh_uuid = summary->mesh_uuid;
+  const bool continuing_policy =
+      this->address_policy_valid_ && this->address_policy_.mesh_uuid == summary->mesh_uuid;
+  if (continuing_policy) {
+    address_policy.installation_nonce = this->address_policy_.installation_nonce;
+    const uint16_t previous = this->address_policy_.current_address;
+    if (previous >= pool_low && previous <= pool_high) {
+      if (pool_low == pool_high) {
+        error = "Provisioner range has no unused local Mesh address";
+        delete summary;
+        return false;
+      }
+      config.local_address = previous <= pool_low
+                                 ? pool_high
+                                 : static_cast<uint16_t>(previous - 1);
+    }
+  } else {
+    address_policy.installation_nonce = esp_random();
+    if (address_policy.installation_nonce == 0)
+      address_policy.installation_nonce = 1;
+  }
+
+  if (config.local_address == 0) {
+    uint8_t mac[6]{};
+    if (esp_read_mac(mac, ESP_MAC_WIFI_STA) != ESP_OK) {
+      error = "Could not read the ESP32 hardware identity";
+      delete summary;
+      return false;
+    }
+    uint32_t hash = 2166136261U;
+    const auto mix = [&hash](uint8_t value) {
+      hash ^= value;
+      hash *= 16777619U;
+    };
+    for (uint8_t value : summary->mesh_uuid)
+      mix(value);
+    for (uint8_t value : mac)
+      mix(value);
+    for (uint8_t shift = 0; shift < 32; shift += 8)
+      mix(static_cast<uint8_t>(address_policy.installation_nonce >> shift));
+    const uint32_t pool_size = static_cast<uint32_t>(pool_high) - pool_low + 1;
+    config.local_address = static_cast<uint16_t>(pool_low + (hash % pool_size));
+  }
+
+  address_policy.initial_address = config.local_address;
+  address_policy.current_address = config.local_address;
   delete summary;
-  if (config.local_address == 0 || config.local_address == config.onoff_address) {
+  if (config.local_address == 0 || config.local_address >= 0x8000) {
     error = "No free local Mesh address";
     return false;
   }
@@ -1413,16 +1606,38 @@ bool NightmatiqMesh::install_network_(const std::string &email, const std::strin
     return false;
   StoredConfig parsed{};
   std::array<uint8_t, 16> device_key{};
-  if (!this->parse_backup_(body, iv_index, node_address, parsed, device_key, error)) return false;
+  StoredAddressPolicy address_policy{};
+  if (!this->parse_backup_(body, iv_index, node_address, parsed, device_key,
+                           address_policy, error))
+    return false;
   parsed.flags |= FLAG_ENABLED;
   if (!this->save_device_key_(device_key)) { error = "Could not save NightmatIQ DeviceKey"; return false; }
-  if (!this->save_config_(parsed)) { error = "Could not save configuration to flash"; return false; }
+  const StoredAddressPolicy previous_policy = this->address_policy_;
+  const bool previous_policy_valid = this->address_policy_valid_;
+  if (!this->save_address_policy_(address_policy)) {
+    error = "Could not save the automatic Mesh address policy";
+    return false;
+  }
+  if (!this->save_config_(parsed)) {
+    if (previous_policy_valid) {
+      this->save_address_policy_(previous_policy);
+    } else {
+      StoredAddressPolicy empty_policy{};
+      empty_policy.magic = 0;
+      this->address_policy_preference_.save(&empty_policy);
+      this->address_policy_ = StoredAddressPolicy{};
+      this->address_policy_valid_ = false;
+    }
+    error = "Could not save configuration to flash";
+    return false;
+  }
   return true;
 }
 
 bool NightmatiqMesh::start_cloud_job_(CloudJob job, const std::string &email, const std::string &password,
                                       const std::string &network_id, uint32_t iv_index,
                                       uint16_t node_address) {
+  this->cloud_session_reboot_pending_.store(false);
   this->cloud_busy_.store(true);
   this->set_status_(job == CloudJob::DISCOVER ? "Connecting to Steinel Cloud" : "Downloading network backup");
   auto *args = new (std::nothrow) CloudTaskArgs{this, job, email, password, network_id, iv_index, node_address};
@@ -1458,7 +1673,7 @@ void NightmatiqMesh::advance_cloud_job_() {
     std::fill(pending->password.begin(), pending->password.end(), '\0');
     delete pending;
     this->cloud_busy_.store(false);
-    this->cloud_ble_resume_pending_.store(true);
+    this->schedule_cloud_session_reboot_(CLOUD_ERROR_REBOOT_DELAY_MS);
     this->set_status_("Could not release Bluetooth memory for HTTPS");
     return;
   }
@@ -1478,10 +1693,15 @@ void NightmatiqMesh::advance_cloud_job_() {
     std::fill(pending->password.begin(), pending->password.end(), '\0');
     delete pending;
     this->cloud_busy_.store(false);
-    this->cloud_ble_resume_pending_.store(true);
+    this->schedule_cloud_session_reboot_(CLOUD_ERROR_REBOOT_DELAY_MS);
     this->set_status_("Could not start cloud task after Bluetooth release; largest block " +
                       std::to_string(largest_internal) + " bytes");
   }
+}
+
+void NightmatiqMesh::schedule_cloud_session_reboot_(uint32_t delay_ms) {
+  this->cloud_session_reboot_at_.store(millis() + delay_ms);
+  this->cloud_session_reboot_pending_.store(true);
 }
 
 void NightmatiqMesh::cloud_task_(void *parameter) {
@@ -1491,15 +1711,21 @@ void NightmatiqMesh::cloud_task_(void *parameter) {
                       ? args->owner->discover_networks_(args->email, args->password, error)
                       : args->owner->install_network_(args->email, args->password, args->network_id,
                                                       args->iv_index, args->node_address, error);
-  if (ok && args->job == CloudJob::DISCOVER) args->owner->set_status_("Select a network containing NightmatIQ", false);
+  if (ok && args->job == CloudJob::DISCOVER) {
+    args->owner->set_status_("Select a network containing NightmatIQ", false);
+    args->owner->schedule_cloud_session_reboot_(CLOUD_DISCOVER_SESSION_TIMEOUT_MS);
+  }
   if (ok && args->job == CloudJob::INSTALL) {
+    args->owner->cloud_session_reboot_pending_.store(false);
     args->owner->set_status_("Configuration saved; rebooting", false);
     args->owner->reboot_at_ = millis() + 2000;
     args->owner->reboot_pending_.store(true);
   }
-  if (!ok) args->owner->set_status_(error, false);
+  if (!ok) {
+    args->owner->set_status_(error, false);
+    args->owner->schedule_cloud_session_reboot_(CLOUD_ERROR_REBOOT_DELAY_MS);
+  }
   args->owner->cloud_busy_.store(false);
-  args->owner->cloud_ble_resume_pending_.store(true);
   ESP_LOGI(WEB_TAG, "Cloud task finished: free internal heap=%u, stack high-water=%u",
            static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)),
            static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)));

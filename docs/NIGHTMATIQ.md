@@ -58,6 +58,32 @@ browser does send it to AR01V3 over local HTTP, so perform first setup only on a
 trusted LAN. Normal operation after import is local and does not require the
 Steinel cloud.
 
+## Automatic Mesh source-address recovery
+
+The imported backup supplies the provisioner's allocated unicast range and the
+addresses occupied by its nodes. AR01V3 derives an unused pool above the
+highest occupied address, limited to at most 2048 addresses at the end of that
+range. Its first source address is distributed through the pool using the Mesh
+UUID, the ESP32 hardware MAC and a random installation identifier; it is not a
+fixed address compiled into the firmware.
+
+The pool, current address, network UUID, installation identifier and recovery
+counters are stored in a separate versioned NVS record. Reimporting the same
+network on the same gateway advances to another address instead of immediately
+reusing the previous source with a reset sequence number. This prevents a
+NightmatIQ Replay Protection List from silently rejecting otherwise valid
+messages after configuration removal, reimport, or replacement of the gateway.
+
+Automatic recovery is deliberately conservative. It starts only after Mesh has
+been ready for at least 60 seconds, the stack has accepted at least 10
+transmissions, at least 10 requests have timed out and no Mesh response has
+been received. It never runs during cloud setup, an active Access operation, a
+Composition Data query or a pending restart. At most 16 automatic address
+changes are allowed for one import. Any authenticated Mesh response marks the
+current address as verified in NVS and permanently disables further automatic
+changes for that imported configuration. A later restart while NightmatIQ is
+temporarily powered off therefore does not consume another address.
+
 ## Disable without deleting data
 
 Open `/steinel` and select **Disable NightmatIQ**. After reboot AR01V3 returns to
@@ -83,8 +109,12 @@ removed.
 
 Diagnostic entities expose `NightmatIQ Installed Firmware`, `NightmatIQ
 Hardware Revision`, `NightmatIQ Manufacturer`, `NightmatIQ Company ID` and
-`NightmatIQ Product ID`. Hexadecimal IDs use lowercase digits; the registered
-Company ID `0x0563` is shown as `0x0563 (Steinel GmbH)`. An optional Lovelace example is available in
+`NightmatIQ Product ID`. `NightmatIQ Signal Strength` reports the RSSI in dBm
+from the latest authenticated Mesh response and keeps that value until another
+valid response arrives. The `/steinel` diagnostics also show the value and its
+age, which distinguishes a weak current link from an old retained reading.
+Hexadecimal IDs use lowercase digits; the registered Company ID `0x0563` is
+shown as `0x0563 (Steinel GmbH)`. An optional Lovelace example is available in
 `home-assistant/nightmatiq_dashboard_card.yaml`; replace its sample entity IDs
 with those discovered for the gateway.
 

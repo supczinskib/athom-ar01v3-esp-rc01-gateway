@@ -72,7 +72,7 @@ def is_generated(path: Path) -> bool:
 
 required_base = (
     'project_name: "envpl.ar01v3_esp_rc01_gateway"',
-    'project_version: "1.2.0"',
+    'project_version: "1.2.1"',
     'type: digest',
     'username: !secret web_server_username',
     'password: !secret web_server_password',
@@ -260,8 +260,9 @@ for marker, source in (
     ("global_bluetooth_proxy->set_active(false)", nightmatiq_mesh_source),
     ("global_esp32_ble_tracker->stop_scan()", nightmatiq_mesh_source),
     ("global_ble->disable()", nightmatiq_mesh_source),
-    ("global_ble->enable()", nightmatiq_mesh_source),
     ("advance_cloud_job_();", nightmatiq_mesh_source),
+    ("cloud_session_reboot_pending_", nightmatiq_mesh_source),
+    ("App.safe_reboot();", nightmatiq_mesh_source),
     ("new (std::nothrow) esp_ble_mesh_prov_t", nightmatiq_mesh_source),
     ("esp_ble_mesh_init(provision, &composition)", nightmatiq_mesh_source),
     ('url == "/steinel/enable"', nightmatiq_web_source),
@@ -279,7 +280,8 @@ for marker, source in (
     ("Starting cloud task after Bluetooth release", nightmatiq_web_source),
     ("esp_bt_controller_get_status() == ESP_BT_CONTROLLER_STATUS_IDLE", nightmatiq_web_source),
     ("esp_bluedroid_get_status() == ESP_BLUEDROID_STATUS_UNINITIALIZED", nightmatiq_web_source),
-    ("cloud_ble_resume_pending_", nightmatiq_web_source),
+    ("schedule_cloud_session_reboot_", nightmatiq_web_source),
+    ("CLOUD_DISCOVER_SESSION_TIMEOUT_MS", nightmatiq_web_source),
     ("cloud_free_after_ble", nightmatiq_web_source),
     ("largest_internal_block", nightmatiq_web_source),
     ("http_config.buffer_size = 1024", nightmatiq_web_source),
@@ -309,6 +311,25 @@ for marker, source in (
     ("actual_output_known", nightmatiq_web_source),
     ("threshold_received", nightmatiq_web_source),
     ("threshold_centilux", nightmatiq_web_source),
+    ("ADDRESS_POLICY_MAGIC", nightmatiq_header_source),
+    ("ADDRESS_POLICY_FLAG_VERIFIED", nightmatiq_header_source),
+    ("ADDRESS_POOL_TARGET_SIZE = 2048", nightmatiq_header_source),
+    ("AUTO_ADDRESS_ROTATION_LIMIT = 16", nightmatiq_header_source),
+    ("AUTO_ADDRESS_RECOVERY_DELAY_MS = 60000", nightmatiq_header_source),
+    ("StoredAddressPolicy", nightmatiq_header_source),
+    ("load_address_policy_", nightmatiq_web_source),
+    ("save_address_policy_", nightmatiq_web_source),
+    ("select_next_local_address_", nightmatiq_web_source),
+    ("rotate_local_address_", nightmatiq_web_source),
+    ("retryable_transport_error", nightmatiq_web_source),
+    ("http_status <= 0", nightmatiq_web_source),
+    ("retrying once with a fresh connection", nightmatiq_web_source),
+    ("advance_address_recovery_", nightmatiq_mesh_source),
+    ('std::strcmp(key, "lowAddress") == 0', nightmatiq_web_source),
+    ('std::strcmp(key, "highAddress") != 0', nightmatiq_web_source),
+    ("esp_read_mac(mac, ESP_MAC_WIFI_STA)", nightmatiq_web_source),
+    ("esp_random()", nightmatiq_web_source),
+    ("verified.flags |= ADDRESS_POLICY_FLAG_VERIFIED", nightmatiq_mesh_source),
     ("begin_access_operation_", nightmatiq_mesh_source),
     ("complete_access_operation_", nightmatiq_mesh_source),
     ("threshold_set_storage_", nightmatiq_header_source),
@@ -344,6 +365,11 @@ for marker, source in (
     ("config_client.model->keys[0] = ESP_BLE_MESH_KEY_DEV", nightmatiq_mesh_source),
     ("nightmatiq_firmware_version", text),
     ("nightmatiq_hardware_version", text),
+    ("nightmatiq_rssi", text),
+    ("NightmatIQ Signal Strength", text),
+    ("rssi_sensor_id", nightmatiq_python_source),
+    ("set_rssi_sensor", nightmatiq_python_source),
+    ("rssi_sensor_->publish_state", nightmatiq_mesh_source),
     ("nightmatiq_actual_output", text),
     ("nightmatiq_manufacturer", text),
     ("nightmatiq_company_id", text),
@@ -359,6 +385,8 @@ for marker, source in (
         errors.append(f"missing NightmatIQ unified-mode marker: {marker}")
 if "provision.prov_unicast_addr =" in nightmatiq_mesh_source:
     errors.append("ESP-IDF const prov_unicast_addr must be initialized, not assigned")
+if "global_ble->enable()" in nightmatiq_mesh_source or "cloud_ble_resume_pending_" in nightmatiq_header_source + nightmatiq_mesh_source + nightmatiq_web_source:
+    errors.append("NightmatIQ cloud flow must recover Bluetooth only through a controlled reboot")
 if "NET_BUF_SIMPLE_DEFINE(value, 3)" in nightmatiq_mesh_source:
     errors.append("NightmatIQ Light LC SET must not reference a stack-backed property buffer")
 if "std::string NightmatiqMesh::status_json_" in nightmatiq_web_source:
@@ -378,6 +406,10 @@ for obsolete in (
         errors.append(f"obsolete passive NightmatIQ identity listener is still present: {obsolete}")
 if 'xTaskCreate(cloud_task_, "steinel_cloud", 12288' in nightmatiq_web_source:
     errors.append("oversized NightmatIQ cloud task stack is still present")
+if 'url == "/steinel/rotate-address"' in nightmatiq_web_source:
+    errors.append("automatic NightmatIQ address recovery must not add a manual web endpoint")
+if "address_pool_low" in nightmatiq_web_source or "automatic_address_rotations" in nightmatiq_web_source:
+    errors.append("NightmatIQ address recovery internals must not alter the public status JSON")
 if 'static_cast<std::string *>(event->user_data)' in nightmatiq_web_source:
     errors.append("NightmatIQ cloud responses must not grow an unchecked std::string")
 if "send_json_(request, 200, this->status_json_())" in nightmatiq_web_source:
@@ -387,6 +419,44 @@ start_cloud_job_block = nightmatiq_web_source.split("bool NightmatiqMesh::start_
 )[0]
 if "xTaskCreate" in start_cloud_job_block:
     errors.append("NightmatIQ HTTPS task must be created only after Bluetooth has released memory")
+
+# Exercise the pure address-selection rules independently of the embedded
+# runtime. This catches off-by-one errors at 0x7FFF, occupied element ranges,
+# one-address pools and wraparound before firmware reaches a device.
+def derive_pool(low: int, high: int, occupied: list[tuple[int, int]]) -> tuple[int, int] | None:
+    if low <= 0 or low > high or high >= 0x8000:
+        return None
+    pool_high = min(high, 0x7FFE)
+    highest_occupied = low - 1
+    for address, elements in occupied:
+        node_last = min(address + max(1, elements) - 1, 0x7FFF)
+        if address <= high and node_last >= low:
+            highest_occupied = max(highest_occupied, min(node_last, high))
+    bounded_pool_low = pool_high - 2048 + 1 if pool_high >= 2048 else low
+    pool_low = max(low, bounded_pool_low, highest_occupied + 1)
+    return None if pool_low > pool_high else (pool_low, pool_high)
+
+
+def next_address(pool: tuple[int, int], current: int) -> int | None:
+    first, last = pool
+    if first >= last:
+        return None
+    candidate = last if current <= first else current - 1
+    return None if candidate == current else candidate
+
+
+if derive_pool(0x0001, 0x199A, [(0x0001, 3)]) != (0x119B, 0x199A):
+    errors.append("NightmatIQ address pool does not match the verified Home-network case")
+if derive_pool(0x0001, 0x7FFF, [(0x0001, 3)]) != (0x77FF, 0x7FFE):
+    errors.append("NightmatIQ address pool must reserve 0x7FFF for provisioner start-address arithmetic")
+if derive_pool(0x1000, 0x1002, [(0x1000, 3)]) is not None:
+    errors.append("NightmatIQ address pool must reject a fully occupied provisioner range")
+if next_address((0x119B, 0x199A), 0x146C) != 0x146B:
+    errors.append("NightmatIQ address recovery must descend through the saved pool")
+if next_address((0x119B, 0x199A), 0x119B) != 0x199A:
+    errors.append("NightmatIQ address recovery must wrap inside the saved pool")
+if next_address((0x199A, 0x199A), 0x199A) is not None:
+    errors.append("NightmatIQ address recovery must stop for a one-address pool")
 
 action_select_block = text.split('name: "Action"', 1)[1].split("\n  - platform:", 1)[0]
 if re.search(r"^      - script\.execute: remote_action_refresh_ui$", action_select_block, re.MULTILINE):
@@ -468,7 +538,7 @@ for marker in (
     "Steinel NightmatIQ Plus", "/steinel/discover", "/steinel/install",
     "/steinel/enable", "/steinel/disable", "Credentials are never saved",
     "Disabling NightmatIQ keeps the saved configuration",
-    "Twilight threshold", " · Confirmed", "Company ID", "Product ID",
+    "Twilight threshold", "Last Mesh RSSI", "meshRssi", " · Confirmed", "Company ID", "Product ID",
     "ENABLE NIGHTMATIQ", "DISABLE NIGHTMATIQ", "REMOVE CONFIGURATION",
 ):
     if marker not in nightmatiq_html:
@@ -485,6 +555,15 @@ for obsolete in (
 if len(nightmatiq_bytes) > 8192:
     errors.append("compressed /steinel page exceeds 8192 bytes")
 
+for marker, source in (
+    ("context.recv_rssi", nightmatiq_mesh_source),
+    ("mesh_rssi_received_", nightmatiq_header_source),
+    ("mesh_last_rssi_dbm", nightmatiq_web_source),
+    ("mesh_last_rssi_age_seconds", nightmatiq_web_source),
+):
+    if marker not in source:
+        errors.append(f"missing NightmatIQ Mesh RSSI marker: {marker}")
+
 secrets_example = (root / "esphome" / "secrets.example.yaml").read_text(encoding="utf-8")
 for marker in ("YOUR_WIFI_SSID", "YOUR_WIFI_PASSWORD", "GENERATED_BY_THE_CONFIGURATION_SCRIPT"):
     if marker not in secrets_example:
@@ -497,7 +576,7 @@ required_files = (
     ".github/workflows/ci.yml", ".github/releases/v1.0.0.md",
     ".github/releases/v1.1.0.md",
     ".github/releases/v1.1.1.md", ".github/releases/v1.1.2.md",
-    ".github/releases/v1.2.0.md",
+    ".github/releases/v1.2.0.md", ".github/releases/v1.2.1.md",
     "home-assistant/blueprints/automation/envpl/esp_rc01_remote_actions.yaml",
     "home-assistant/nightmatiq_dashboard_card.yaml",
     "docs/NIGHTMATIQ.md", "docs/NIGHTMATIQ_PL.md",
@@ -516,6 +595,17 @@ for relative in required_files:
 
 if (root / "esphome" / "ar01v3-nightmatiq-experimental.yaml").exists():
     errors.append("separate NightmatIQ firmware entry point must not exist")
+
+base_yaml = (root / "esphome" / "ar01v3-espnow-10x10-base.yaml").read_text(encoding="utf-8")
+if "  max_send_queue: 8\n" not in base_yaml:
+    errors.append("ESPHome API send queue must retain the ESP32 depth needed for entity discovery")
+for marker in (
+    "    id: nightmatiq_mode\n",
+    "    restore_value: true\n",
+    "    initial_option: \"Auto\"\n",
+):
+    if marker not in base_yaml:
+        errors.append(f"NightmatIQ mode startup state is missing: {marker.strip()}")
 
 if publication_mode:
     generated_build_dirs = sorted({

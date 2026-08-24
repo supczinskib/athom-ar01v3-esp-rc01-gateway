@@ -23,21 +23,21 @@ Use the following values when creating the public repository.
 
 Both README files include the status badge for `.github/workflows/ci.yml`. It will report a result after the first workflow run on GitHub.
 
-## Release 1.2.0
+## Release 1.2.1
 
 1. Run `bash scripts/00_self_test.sh --publication` in a clean tree.
 2. Run `bash scripts/03_validate_all.sh` in a configured development tree.
 3. Compile and hardware-test at least receiver 01.
-4. Create tag `v1.2.0` from the tested commit.
-5. Create a GitHub release named `AR01V3 RF/IR, ESP-RC01 & Steinel NightmatIQ Plus Gateway v1.2.0`.
-6. Use `.github/releases/v1.2.0.md` as the release description.
+4. Create tag `v1.2.1` from the tested commit.
+5. Create a GitHub release named `AR01V3 RF/IR, ESP-RC01 & Steinel NightmatIQ Plus Gateway v1.2.1`.
+6. Use `.github/releases/v1.2.1.md` as the release description.
 7. Push the tested commit and tag, then create the release from the prepared
    release notes:
 
    ```bash
    git push origin main
-   git push origin v1.2.0
-   gh release create v1.2.0 --title "AR01V3 RF/IR, ESP-RC01 & Steinel NightmatIQ Plus Gateway v1.2.0" --notes-file .github/releases/v1.2.0.md
+   git push origin v1.2.1
+   gh release create v1.2.1 --title "AR01V3 RF/IR, ESP-RC01 & Steinel NightmatIQ Plus Gateway v1.2.1" --notes-file .github/releases/v1.2.1.md
    ```
 
 ## Screenshots

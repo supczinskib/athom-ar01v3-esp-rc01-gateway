@@ -13,7 +13,7 @@ Steinel NightmatIQ Plus <-> Bluetooth Mesh <-> bramka AR01V3 -> Home Assistant
 
 Społecznościowy firmware ESPHome, który przekształca oparty na ESP32 Athom AR01V3 w lokalną bramkę RF, IR i ESP-NOW. Zapewnia 16 trwałych slotów RF i 10 trwałych slotów IR, zdalne programowanie sygnałów przez sieć, standardowe encje przycisków Home Assistant, parametryzowane i wygodne w GUI akcje nadawania oraz obsługę do 10 pilotów ESP-RC01 przez maksymalnie 10 odbiorników AR01V3. Każdy przycisk ESP-RC01 może zostać przekazany do Home Assistant albo bezpośrednio przypisany do zapisanego slotu IR/RF, co umożliwia autonomiczne działanie bez dostępnego Home Assistant. Zapisane polecenia można również przypisywać do wirtualnych urządzeń, skryptów, scen i automatyzacji bez zahardkodowanych mapowań sprzętu.
 
-Wersja 1.2.0 dodaje opcjonalną lokalną integrację Bluetooth Mesh i Home Assistant ze Steinel IS Digi NM 2E6915 NightmatIQ Plus, zachowując w tym samym firmware funkcje RF, IR, ESP-NOW, import Flippera i OTA.
+Wersja 1.2.1 poprawia opcjonalną integrację ze Steinel IS Digi NM 2E6915 NightmatIQ Plus przez trwałe odzyskiwanie adresu źródłowego Bluetooth Mesh, diagnostykę RSSI ostatniej odpowiedzi w Home Assistant oraz stabilniejsze wykrywanie encji HA i operacje konfiguracji chmurowej. RF, IR, ESP-NOW, import Flippera, Bluetooth Proxy i OTA pozostają dostępne w tym samym firmware.
 
 Autor i opiekun projektu: **Bartosz Supcziński** — <bartek@env.pl>
 
@@ -155,7 +155,12 @@ Zwykły firmware zawiera chronioną stronę `/steinel`, która może pobrać z c
 Steinel kopię wybranej sieci bez zapisywania hasła konta. Integracja tworzy w
 Home Assistant osobne urządzenie NightmatIQ z natężeniem światła, progiem
 zmierzchowym, trybem pracy, odpornym stanem rzeczywistego wyjścia, zainstalowaną
-wersją firmware, rewizją sprzętową, Company ID i Product ID. AR01V3 domyślnie
+wersją firmware, rewizją sprzętową, Company ID, Product ID i diagnostyczną siłą
+sygnału Mesh. AR01V3 wybiera i trwale zapisuje adres źródłowy z wolnej części
+zakresu provisionera. Jeżeli po usunięciu, ponownym imporcie albo wymianie
+bramki nowa sekwencja Mesh zostanie odrzucona przez Replay Protection List
+urządzenia, firmware może ostrożnie przejść do następnego zapisanego adresu i
+blokuje dalsze zmiany po pierwszej uwierzytelnionej odpowiedzi. AR01V3 domyślnie
 działa jako Bluetooth Proxy; włączenie NightmatIQ przełącza następny start na
 Bluetooth Mesh. Wyłączenie przez WWW zachowuje dane Mesh i po restarcie
 przywraca Bluetooth Proxy. RF, IR i ESP-NOW pozostają dostępne w obu trybach.
@@ -382,7 +387,7 @@ Import do zajętego slotu zastępuje poprzedni rekord. Oryginalne pliki warto za
 
 Główne urządzenie jest widoczne jako **Athom RF IR Remote**. Home Assistant może osobno pokazać **AR01V3 Stored Signal Actions**. To celowe podurządzenie z 26 przyciskami przygotowanymi do użycia w wirtualnych urządzeniach, skryptach, scenach i automatyzacjach.
 
-Jeżeli po aktualizacji firmware przycisków nie widać, przeładuj integrację ESPHome lub uruchom ponownie Home Assistant i sprawdź wersję projektu `1.2.0`.
+Jeżeli po aktualizacji firmware przycisków nie widać, przeładuj integrację ESPHome lub uruchom ponownie Home Assistant i sprawdź wersję projektu `1.2.1`.
 
 ### Wywołanie zapisanego slotu w GUI
 
@@ -599,7 +604,7 @@ Zdarzenie pilota zawiera również `sequence`, `button_code`, `battery`, `remote
 
 ### Akcji nie widać w HA
 
-- Sprawdź połączenie integracji ESPHome i wersję projektu `1.2.0`.
+- Sprawdź połączenie integracji ESPHome i wersję projektu `1.2.1`.
 - Po aktualizacji firmware przeładuj integrację ESPHome lub zrestartuj HA.
 - Dla slotów wybierz akcję **Przycisk: Naciśnij** i encję `Send IR Slot N` albo `Send RF Slot N`; sensor podglądu nie nadaje.
 - Akcje bezpośrednie zaczynają się od `esphome.<nazwa_węzła>_transmit_...`.

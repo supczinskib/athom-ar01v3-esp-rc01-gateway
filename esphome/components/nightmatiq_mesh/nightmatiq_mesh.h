@@ -35,6 +35,7 @@ class NightmatiqMesh final : public PollingComponent,
   explicit NightmatiqMesh(web_server_base::WebServerBase *base) : base_(base) {}
 
   void set_lux_sensor(sensor::Sensor *value) { this->lux_sensor_ = value; }
+  void set_rssi_sensor(sensor::Sensor *value) { this->rssi_sensor_ = value; }
   void set_threshold_number(number::Number *value) { this->threshold_number_ = value; }
   void set_mode_select(select::Select *value) { this->mode_select_ = value; }
   void set_ready_binary_sensor(binary_sensor::BinarySensor *value) { this->ready_binary_sensor_ = value; }
@@ -100,6 +101,14 @@ class NightmatiqMesh final : public PollingComponent,
   static constexpr uint16_t DEVICE_KEY_VERSION = 1;
   static constexpr uint32_t RETIRED_ADDRESS_MAGIC = 0x4E4D5141U;  // "NMQA"
   static constexpr uint16_t RETIRED_ADDRESS_VERSION = 1;
+  static constexpr uint32_t ADDRESS_POLICY_MAGIC = 0x4E4D5150U;  // "NMQP"
+  static constexpr uint16_t ADDRESS_POLICY_VERSION = 1;
+  static constexpr uint16_t ADDRESS_POLICY_FLAG_VERIFIED = 0x0001;
+  static constexpr uint16_t ADDRESS_POOL_TARGET_SIZE = 2048;
+  static constexpr uint16_t AUTO_ADDRESS_ROTATION_LIMIT = 16;
+  static constexpr uint32_t AUTO_ADDRESS_RECOVERY_DELAY_MS = 60000;
+  static constexpr uint32_t AUTO_ADDRESS_MIN_ACCEPTED_TX = 10;
+  static constexpr uint32_t AUTO_ADDRESS_MIN_TIMEOUTS = 10;
   static constexpr uint32_t IV_CACHE_MAGIC = 0x4E4D5149U;  // "NMQI"
   static constexpr uint16_t IV_CACHE_VERSION = 1;
   static constexpr uint32_t ADVERTISED_IDENTITY_MAGIC = 0x4E4D5156U;  // "NMQV"
@@ -147,6 +156,19 @@ class NightmatiqMesh final : public PollingComponent,
     uint32_t magic{RETIRED_ADDRESS_MAGIC};
     uint16_t version{RETIRED_ADDRESS_VERSION};
     uint16_t address{0};
+  };
+
+  struct StoredAddressPolicy {
+    uint32_t magic{ADDRESS_POLICY_MAGIC};
+    uint16_t version{ADDRESS_POLICY_VERSION};
+    uint16_t pool_low{0};
+    uint16_t pool_high{0};
+    uint16_t initial_address{0};
+    uint16_t current_address{0};
+    uint16_t automatic_rotations{0};
+    uint16_t flags{0};
+    uint32_t installation_nonce{0};
+    std::array<uint8_t, 16> mesh_uuid{};
   };
 
   struct StoredIvCache {
@@ -220,6 +242,11 @@ class NightmatiqMesh final : public PollingComponent,
   bool load_device_key_();
   void load_retired_address_();
   void retire_local_address_();
+  bool load_address_policy_();
+  bool save_address_policy_(const StoredAddressPolicy &policy);
+  bool select_next_local_address_(uint16_t &address) const;
+  bool rotate_local_address_(std::string &error);
+  void advance_address_recovery_(uint32_t now);
   bool load_cached_iv_index_(const std::array<uint8_t, 16> &mesh_uuid, uint32_t &iv_index);
   void remember_iv_index_(const StoredConfig &config);
   bool load_advertised_identity_();
@@ -233,7 +260,8 @@ class NightmatiqMesh final : public PollingComponent,
   void clear_config_();
   bool parse_backup_(const CloudBody &body, uint32_t requested_iv_index,
                      uint16_t requested_node_address, StoredConfig &config,
-                     std::array<uint8_t, 16> &device_key, std::string &error);
+                     std::array<uint8_t, 16> &device_key,
+                     StoredAddressPolicy &address_policy, std::string &error);
   bool cloud_get_(const std::string &path, const std::string &email, const std::string &password,
                   bool use_ota_workspace, CloudBody &body, int &http_status, std::string &error);
   bool discover_networks_(const std::string &email, const std::string &password, std::string &error);
@@ -245,7 +273,7 @@ class NightmatiqMesh final : public PollingComponent,
                         uint16_t node_address = 0);
   void pause_ble_for_cloud_();
   void advance_cloud_job_();
-  void resume_ble_after_cloud_();
+  void schedule_cloud_session_reboot_(uint32_t delay_ms);
   static void cloud_task_(void *parameter);
   static esp_err_t cloud_http_event_(esp_http_client_event_t *event);
 
@@ -280,6 +308,7 @@ class NightmatiqMesh final : public PollingComponent,
   void mark_ready_();
   void publish_pending_();
   void publish_mode_from_observed_();
+  void record_mesh_rssi_(const esp_ble_mesh_msg_ctx_t &context);
   void record_actual_output_(bool on);
   void force_actual_output_unavailable_();
 
@@ -302,12 +331,15 @@ class NightmatiqMesh final : public PollingComponent,
   ESPPreferenceObject config_preference_;
   ESPPreferenceObject device_key_preference_;
   ESPPreferenceObject retired_address_preference_;
+  ESPPreferenceObject address_policy_preference_;
   ESPPreferenceObject iv_cache_preference_;
   ESPPreferenceObject advertised_identity_preference_;
   StoredConfig config_{};
   std::array<uint8_t, 16> device_key_{};
   bool device_key_valid_{false};
   uint16_t retired_local_address_{0};
+  StoredAddressPolicy address_policy_{};
+  bool address_policy_valid_{false};
   bool configured_{false};
   bool mesh_mode_enabled_{false};
   bool mesh_started_{false};
@@ -335,6 +367,7 @@ class NightmatiqMesh final : public PollingComponent,
   uint8_t tid_{0};
 
   sensor::Sensor *lux_sensor_{nullptr};
+  sensor::Sensor *rssi_sensor_{nullptr};
   number::Number *threshold_number_{nullptr};
   select::Select *mode_select_{nullptr};
   binary_sensor::BinarySensor *ready_binary_sensor_{nullptr};
@@ -354,8 +387,9 @@ class NightmatiqMesh final : public PollingComponent,
   std::atomic<bool> cloud_busy_{false};
   std::atomic<CloudTaskArgs *> cloud_pending_args_{nullptr};
   std::atomic<bool> cloud_ble_pause_pending_{false};
-  std::atomic<bool> cloud_ble_resume_pending_{false};
   std::atomic<uint32_t> cloud_ble_pause_deadline_{0};
+  std::atomic<bool> cloud_session_reboot_pending_{false};
+  std::atomic<uint32_t> cloud_session_reboot_at_{0};
   std::atomic<uint32_t> cloud_free_after_ble_{0};
   std::atomic<uint32_t> cloud_largest_after_ble_{0};
   std::atomic<uint32_t> cloud_response_bytes_{0};
@@ -363,6 +397,8 @@ class NightmatiqMesh final : public PollingComponent,
   uint32_t reboot_at_{0};
 
   std::atomic<bool> mesh_ready_{false};
+  uint32_t mesh_ready_at_{0};
+  bool address_recovery_attempted_this_boot_{false};
   std::atomic<uint32_t> live_iv_index_{0};
   std::atomic<bool> live_iv_index_confirmed_{false};
   std::atomic<bool> ready_publish_pending_{false};
@@ -391,6 +427,10 @@ class NightmatiqMesh final : public PollingComponent,
   std::atomic<int32_t> mesh_last_tx_error_{0};
   std::atomic<uint32_t> mesh_rx_messages_{0};
   std::atomic<uint32_t> mesh_timeouts_{0};
+  std::atomic<int16_t> last_mesh_rssi_dbm_{0};
+  std::atomic<uint32_t> last_mesh_rssi_at_{0};
+  std::atomic<bool> mesh_rssi_received_{false};
+  std::atomic<bool> mesh_rssi_publish_pending_{false};
   std::atomic<uint32_t> mesh_generic_rx_{0};
   std::atomic<uint32_t> mesh_sensor_rx_{0};
   std::atomic<uint32_t> mesh_light_rx_{0};

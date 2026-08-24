@@ -58,6 +58,32 @@ Przeglądarka wysyła je jednak do AR01V3 przez lokalny HTTP, więc pierwszą
 konfigurację wykonuj wyłącznie w zaufanym LAN. Po udanym imporcie codzienna
 komunikacja z NightmatIQ jest lokalna i nie wymaga chmury Steinel.
 
+## Automatyczne odzyskiwanie adresu źródłowego Mesh
+
+Zaimportowany backup dostarcza zakres adresów unicast przydzielony
+provisionerowi oraz adresy zajęte przez węzły. AR01V3 wyznacza wolną pulę ponad
+najwyższym zajętym adresem, ograniczoną do maksymalnie 2048 adresów na końcu
+tego zakresu. Pierwszy adres źródłowy jest rozpraszany w puli na podstawie UUID
+sieci Mesh, sprzętowego MAC ESP32 i losowego identyfikatora instalacji; nie jest
+stałą wpisaną do firmware.
+
+Pula, bieżący adres, UUID sieci, identyfikator instalacji i liczniki odzyskiwania
+są przechowywane w osobnym, wersjonowanym rekordzie NVS. Ponowny import tej
+samej sieci na tej samej bramce przechodzi do innego adresu zamiast od razu
+używać poprzedniego źródła z wyzerowanym numerem sekwencyjnym. Zapobiega to
+cichemu odrzucaniu prawidłowych wiadomości przez Replay Protection List
+NightmatIQ po usunięciu konfiguracji, ponownym imporcie albo wymianie bramki.
+
+Automatyczne odzyskiwanie ma zachowawcze warunki. Uruchamia się dopiero wtedy,
+gdy Mesh jest gotowy od co najmniej 60 sekund, stos zaakceptował przynajmniej
+10 transmisji, wystąpiło co najmniej 10 timeoutów i nie odebrano żadnej
+odpowiedzi Mesh. Nie działa podczas konfiguracji chmurowej, aktywnej operacji
+Access, zapytania Composition Data ani oczekującego restartu. Dla jednego
+importu dopuszczalne jest maksymalnie 16 automatycznych zmian adresu. Każda
+uwierzytelniona odpowiedź zapisuje bieżący adres w NVS jako potwierdzony i
+trwale blokuje dalsze automatyczne zmiany dla tej konfiguracji. Późniejszy
+restart przy chwilowo wyłączonym NightmatIQ nie zużyje więc następnego adresu.
+
 ## Wyłączenie bez usuwania danych
 
 Na `/steinel` wybierz **Disable NightmatIQ**. AR01V3 zapisze stan wyłączenia i
@@ -88,6 +114,9 @@ Plus` i przypisuje do niego encje:
   diagnostyczne odczytane z urządzenia. Identyfikatory szesnastkowe używają
   małych liter; zarejestrowany Company ID `0x0563` jest wyświetlany jako
   `0x0563 (Steinel GmbH)`;
+- `NightmatIQ Signal Strength` — diagnostyczne RSSI w dBm z ostatniej
+  uwierzytelnionej odpowiedzi Mesh. Wartość pozostaje zapamiętana do następnej
+  prawidłowej odpowiedzi; diagnostyka `/steinel` pokazuje również wiek odczytu;
 - `NightmatIQ Refresh` — wymusza natychmiastowe ponowne odczytanie danych z
   urządzenia; nie zmienia jego konfiguracji.
 

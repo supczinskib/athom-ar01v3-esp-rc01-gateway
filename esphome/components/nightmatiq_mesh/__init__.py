@@ -17,6 +17,7 @@ DEPENDENCIES = ["esp32", "web_server", "bluetooth_proxy", "esp32_ble_tracker"]
 AUTO_LOAD = ["binary_sensor", "number", "select", "sensor", "text_sensor", "web_server_base"]
 
 CONF_LUX_SENSOR_ID = "lux_sensor_id"
+CONF_RSSI_SENSOR_ID = "rssi_sensor_id"
 CONF_THRESHOLD_NUMBER_ID = "threshold_number_id"
 CONF_MODE_SELECT_ID = "mode_select_id"
 CONF_READY_BINARY_SENSOR_ID = "ready_binary_sensor_id"
@@ -42,6 +43,7 @@ CONFIG_SCHEMA = cv.Schema(
         cv.GenerateID(): cv.declare_id(NightmatiqMesh),
         cv.GenerateID(CONF_WEB_SERVER_BASE_ID): cv.use_id(web_server_base.WebServerBase),
         cv.Required(CONF_LUX_SENSOR_ID): cv.use_id(sensor.Sensor),
+        cv.Required(CONF_RSSI_SENSOR_ID): cv.use_id(sensor.Sensor),
         cv.Required(CONF_THRESHOLD_NUMBER_ID): cv.use_id(number.Number),
         cv.Required(CONF_MODE_SELECT_ID): cv.use_id(select.Select),
         cv.Required(CONF_READY_BINARY_SENSOR_ID): cv.use_id(binary_sensor.BinarySensor),
@@ -71,6 +73,7 @@ async def to_code(config):
     await esp32_ble_tracker.register_ble_device(var, config)
 
     lux = await cg.get_variable(config[CONF_LUX_SENSOR_ID])
+    rssi = await cg.get_variable(config[CONF_RSSI_SENSOR_ID])
     threshold = await cg.get_variable(config[CONF_THRESHOLD_NUMBER_ID])
     mode = await cg.get_variable(config[CONF_MODE_SELECT_ID])
     ready = await cg.get_variable(config[CONF_READY_BINARY_SENSOR_ID])
@@ -82,6 +85,7 @@ async def to_code(config):
     company_id = await cg.get_variable(config[CONF_COMPANY_ID_TEXT_SENSOR_ID])
     product_id = await cg.get_variable(config[CONF_PRODUCT_ID_TEXT_SENSOR_ID])
     cg.add(var.set_lux_sensor(lux))
+    cg.add(var.set_rssi_sensor(rssi))
     cg.add(var.set_threshold_number(threshold))
     cg.add(var.set_mode_select(mode))
     cg.add(var.set_ready_binary_sensor(ready))

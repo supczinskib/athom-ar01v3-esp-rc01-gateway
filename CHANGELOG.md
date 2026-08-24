@@ -4,6 +4,32 @@ All notable project changes are documented here.
 
 ## Unreleased
 
+## 1.2.1 — 2026-08-24
+
+- Added an automatic, NVS-backed Bluetooth Mesh source-address policy derived
+  from the imported provisioner range and the addresses occupied by its nodes.
+- Distributed a new installation's initial gateway address using the Mesh UUID,
+  ESP32 hardware MAC and a random installation identifier instead of compiling
+  a fixed source address into the firmware.
+- Added conservative recovery from silent Replay Protection List rejection:
+  after sustained accepted transmissions, timeouts and zero responses, the
+  gateway advances through its saved address pool and performs a controlled
+  restart, with a limit of 16 automatic changes per import.
+- Persisted successful address verification in NVS so a later restart while
+  NightmatIQ is temporarily unavailable cannot consume another address.
+- Added last-response Bluetooth Mesh RSSI to `/steinel` diagnostics and exposed
+  it as the `NightmatIQ Signal Strength` diagnostic sensor in Home Assistant.
+- Restored the normal ESPHome API send-queue depth so the first publication of
+  the full entity set does not leave NightmatIQ entities unavailable in Home
+  Assistant, while retaining bounded low-memory allocation behavior.
+- Made the NightmatIQ operating-mode control optimistic for immediate Home
+  Assistant feedback while subsequent authenticated reads reconcile the real
+  device state.
+- Hardened removal, cloud-session error handling and setup lifecycle changes by
+  using controlled restarts into the required Bluetooth mode.
+- Extended regression tests and the English and Polish NightmatIQ
+  documentation for source-address recovery and RSSI reporting.
+
 ## 1.2.0 — 2026-08-23
 
 - Added optional Steinel NightmatIQ Plus support to the normal firmware used by

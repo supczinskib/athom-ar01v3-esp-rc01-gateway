@@ -693,8 +693,9 @@ void NightmatiqMesh::advance_mesh_remove_() {
     return;
 
   this->clear_config_();
-  this->cloud_ble_resume_pending_.store(true);
-  this->set_status_("Configuration removed; Bluetooth Proxy active");
+  this->set_status_("Configuration removed; rebooting into Bluetooth Proxy mode");
+  this->reboot_at_ = millis() + 1500;
+  this->reboot_pending_.store(true);
 }
 
 void NightmatiqMesh::monitor_iv_index_() {
@@ -744,13 +745,30 @@ void NightmatiqMesh::setup() {
   this->iv_cache_preference_ = global_preferences->make_preference<StoredIvCache>(0x4E4D5104U);
   this->advertised_identity_preference_ =
       global_preferences->make_preference<StoredAdvertisedIdentity>(0x4E4D5105U);
+  this->address_policy_preference_ =
+      global_preferences->make_preference<StoredAddressPolicy>(0x4E4D5106U);
   this->load_advertised_identity_();
   this->load_retired_address_();
+  this->load_address_policy_();
   if (this->ready_binary_sensor_ != nullptr)
     this->ready_binary_sensor_->publish_state(false);
   if (!this->load_config_()) {
     this->set_status_("Bluetooth Proxy active; open /steinel to configure NightmatIQ");
     return;
+  }
+  if (this->address_policy_valid_ &&
+      this->address_policy_.mesh_uuid == this->config_.mesh_uuid &&
+      this->config_.local_address >= this->address_policy_.pool_low &&
+      this->config_.local_address <= this->address_policy_.pool_high &&
+      this->address_policy_.current_address != this->config_.local_address) {
+    // The two records are saved independently. If power was lost between
+    // their writes, the active configuration is authoritative and the policy
+    // is repaired before Mesh starts.
+    StoredAddressPolicy repaired = this->address_policy_;
+    repaired.current_address = this->config_.local_address;
+    repaired.flags &= static_cast<uint16_t>(~ADDRESS_POLICY_FLAG_VERIFIED);
+    if (!this->save_address_policy_(repaired))
+      ESP_LOGW(TAG, "Could not reconcile the saved Mesh address policy");
   }
   this->load_device_key_();
   this->mesh_mode_enabled_ = (this->config_.flags & (FLAG_ENABLED | FLAG_REMOVE_PENDING)) != 0;
@@ -875,6 +893,8 @@ void NightmatiqMesh::bind_model_(uint16_t model_id) {
 
 void NightmatiqMesh::mark_ready_() {
   this->mesh_ready_.store(true);
+  this->mesh_ready_at_ = millis();
+  this->address_recovery_attempted_this_boot_ = false;
   this->ready_publish_pending_.store(true);
   this->set_status_("Mesh client ready; polling NightmatIQ");
   ESP_LOGI(TAG, "NightmatIQ mesh keys imported and all client models bound");
@@ -885,6 +905,46 @@ void NightmatiqMesh::mark_ready_() {
     this->composition_query_pending_.store(true);
   } else {
     ESP_LOGW(TAG, "NightmatIQ DeviceKey is not stored; live product/version read is unavailable until reimport");
+  }
+}
+
+void NightmatiqMesh::advance_address_recovery_(uint32_t now) {
+  if (!this->address_policy_valid_ || !this->configured_ ||
+      this->address_policy_.mesh_uuid != this->config_.mesh_uuid ||
+      this->address_policy_.current_address != this->config_.local_address)
+    return;
+
+  if (this->mesh_rx_messages_.load() != 0) {
+    if ((this->address_policy_.flags & ADDRESS_POLICY_FLAG_VERIFIED) == 0) {
+      StoredAddressPolicy verified = this->address_policy_;
+      verified.flags |= ADDRESS_POLICY_FLAG_VERIFIED;
+      if (this->save_address_policy_(verified)) {
+        ESP_LOGI(TAG, "Verified local Mesh address 0x%04X and disabled automatic rotation",
+                 verified.current_address);
+      } else {
+        ESP_LOGW(TAG, "Could not persist verification of local Mesh address 0x%04X",
+                 verified.current_address);
+      }
+    }
+    return;
+  }
+
+  if ((this->address_policy_.flags & ADDRESS_POLICY_FLAG_VERIFIED) != 0 ||
+      this->address_recovery_attempted_this_boot_ || !this->mesh_ready_.load() ||
+      !this->mesh_mode_enabled_ || this->mesh_ready_at_ == 0 ||
+      static_cast<uint32_t>(now - this->mesh_ready_at_) < AUTO_ADDRESS_RECOVERY_DELAY_MS ||
+      this->mesh_tx_accepted_.load() < AUTO_ADDRESS_MIN_ACCEPTED_TX ||
+      this->mesh_timeouts_.load() < AUTO_ADDRESS_MIN_TIMEOUTS ||
+      this->cloud_busy_.load() || this->reboot_pending_.load() ||
+      this->composition_query_in_flight_.load() ||
+      this->access_operation_.load() != AccessOperation::NONE)
+    return;
+
+  this->address_recovery_attempted_this_boot_ = true;
+  std::string error;
+  if (!this->rotate_local_address_(error)) {
+    ESP_LOGE(TAG, "Automatic local Mesh address recovery stopped: %s", error.c_str());
+    this->set_status_(error);
   }
 }
 
@@ -1061,6 +1121,7 @@ void NightmatiqMesh::config_callback(esp_ble_mesh_cfg_client_cb_event_t event,
   self->composition_query_pending_.store(true);
   self->composition_responses_.fetch_add(1);
   self->mesh_rx_messages_.fetch_add(1);
+  self->record_mesh_rssi_(param->params->ctx);
 
   if (self->advertised_identity_valid_.load() && self->identity_found_this_boot_.load()) {
     // Associate the observed Steinel manufacturer advertisement with the
@@ -1528,6 +1589,13 @@ void NightmatiqMesh::publish_mode_from_observed_() {
     this->mode_publish_pending_.store(onoff != 0 ? 1 : 2);
 }
 
+void NightmatiqMesh::record_mesh_rssi_(const esp_ble_mesh_msg_ctx_t &context) {
+  this->last_mesh_rssi_dbm_.store(context.recv_rssi);
+  this->last_mesh_rssi_at_.store(millis());
+  this->mesh_rssi_received_.store(true);
+  this->mesh_rssi_publish_pending_.store(true);
+}
+
 void NightmatiqMesh::record_actual_output_(bool on) {
   if (this->actual_output_forced_unavailable_.load())
     return;
@@ -1561,6 +1629,7 @@ void NightmatiqMesh::generic_callback(esp_ble_mesh_generic_client_cb_event_t eve
   }
   self->mesh_rx_messages_.fetch_add(1);
   self->mesh_generic_rx_.fetch_add(1);
+  self->record_mesh_rssi_(param->params->ctx);
   if (param->params->ctx.recv_op == ESP_BLE_MESH_MODEL_OP_GEN_ONOFF_STATUS) {
     self->onoff_response_sequence_.fetch_add(1);
     self->record_actual_output_(param->status_cb.onoff_status.present_onoff != 0);
@@ -1588,6 +1657,7 @@ void NightmatiqMesh::sensor_callback(esp_ble_mesh_sensor_client_cb_event_t event
   }
   self->mesh_rx_messages_.fetch_add(1);
   self->mesh_sensor_rx_.fetch_add(1);
+  self->record_mesh_rssi_(param->params->ctx);
 
   net_buf_simple *buffer = param->status_cb.sensor_status.marshalled_sensor_data;
   if (buffer == nullptr) {
@@ -1665,6 +1735,7 @@ void NightmatiqMesh::light_callback(esp_ble_mesh_light_client_cb_event_t event,
   }
   self->mesh_rx_messages_.fetch_add(1);
   self->mesh_light_rx_.fetch_add(1);
+  self->record_mesh_rssi_(param->params->ctx);
 
   const uint32_t received = param->params->ctx.recv_op;
   if (received == ESP_BLE_MESH_MODEL_OP_LIGHT_LC_MODE_STATUS) {
@@ -1716,6 +1787,7 @@ void NightmatiqMesh::scene_callback(esp_ble_mesh_time_scene_client_cb_event_t ev
   if (param->error_code == 0) {
     self->mesh_rx_messages_.fetch_add(1);
     self->mesh_scene_rx_.fetch_add(1);
+    self->record_mesh_rssi_(param->params->ctx);
   }
   const bool success = param->error_code == 0 &&
                        (param->params->ctx.recv_op != ESP_BLE_MESH_MODEL_OP_SCENE_STATUS ||
@@ -1806,6 +1878,10 @@ void NightmatiqMesh::publish_pending_() {
     if (this->lux_sensor_ != nullptr)
       this->lux_sensor_->publish_state(this->pending_lux_centilux_.load() / 100.0f);
   }
+  if (this->mesh_rssi_publish_pending_.exchange(false)) {
+    if (this->rssi_sensor_ != nullptr)
+      this->rssi_sensor_->publish_state(this->last_mesh_rssi_dbm_.load());
+  }
   if (this->threshold_invalidate_pending_.exchange(false)) {
     if (this->threshold_number_ != nullptr)
       this->threshold_number_->publish_state(NAN);
@@ -1876,11 +1952,16 @@ void NightmatiqMesh::loop() {
       esp32_ble::global_ble->disable();
   }
   this->advance_cloud_job_();
-  this->resume_ble_after_cloud_();
 
   const uint32_t now = millis();
   if (this->reboot_pending_.load() && static_cast<int32_t>(now - this->reboot_at_) >= 0) {
     this->reboot_pending_.store(false);
+    App.safe_reboot();
+    return;
+  }
+  if (this->cloud_session_reboot_pending_.load() && !this->cloud_busy_.load() &&
+      static_cast<int32_t>(now - this->cloud_session_reboot_at_.load()) >= 0) {
+    this->cloud_session_reboot_pending_.store(false);
     App.safe_reboot();
     return;
   }
@@ -1891,6 +1972,9 @@ void NightmatiqMesh::loop() {
   if (!this->mesh_ready_.load())
     return;
   this->expire_access_operation_(now);
+  this->advance_address_recovery_(now);
+  if (this->reboot_pending_.load())
+    return;
   if (this->mode_override_pending_.load() &&
       this->mode_confirmation_deadline_.load() != 0 &&
       static_cast<int32_t>(now - this->mode_confirmation_deadline_.load()) >= 0) {
@@ -2032,28 +2116,6 @@ void NightmatiqMesh::pause_ble_for_cloud_() {
   if (this->mesh_mode_enabled_)
     return;
   this->cloud_ble_pause_pending_.store(true);
-}
-
-void NightmatiqMesh::resume_ble_after_cloud_() {
-  if (!this->cloud_ble_resume_pending_.load() || this->mesh_mode_enabled_)
-    return;
-
-  if (esp32_ble::global_ble != nullptr && !esp32_ble::global_ble->is_active()) {
-    esp32_ble::global_ble->enable();
-    return;
-  }
-
-  if (bluetooth_proxy::global_bluetooth_proxy != nullptr)
-    bluetooth_proxy::global_bluetooth_proxy->set_active(true);
-
-  const bool api_connected = api::global_api_server != nullptr && api::global_api_server->is_connected();
-  if (api_connected && esp32_ble_tracker::global_esp32_ble_tracker != nullptr) {
-    if (esp32_ble_tracker::global_esp32_ble_tracker->get_scanner_state() !=
-        esp32_ble_tracker::ScannerState::IDLE)
-      return;
-    esp32_ble_tracker::global_esp32_ble_tracker->start_scan();
-  }
-  this->cloud_ble_resume_pending_.store(false);
 }
 
 }  // namespace nightmatiq_mesh
