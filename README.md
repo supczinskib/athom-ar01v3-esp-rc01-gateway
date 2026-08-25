@@ -642,6 +642,10 @@ python3 scripts/generate_nightmatiq_page.py
 
 Run `scripts/00_self_test.sh` afterward. Do not edit generated headers by hand.
 
+## Related project
+
+The same Steinel NightmatIQ Plus functionality is also available in the dedicated [Steinel NightmatIQ Plus Gateway for ESP32-C3](https://github.com/supczinskib/steinel-nightmatiq-esp32-c3-gateway). Choose that project for a small standalone ESP32-C3 installation without the AR01V3 RF/IR and ESP-RC01 features; choose this repository when NightmatIQ should be an optional integration in a multifunction AR01V3 gateway.
+
 ## Credits, license, and support
 
 - Author: [Bartosz Supcziński](AUTHORS.md), <bartek@env.pl>.

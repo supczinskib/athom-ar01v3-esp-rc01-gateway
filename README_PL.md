@@ -628,6 +628,10 @@ python3 scripts/generate_nightmatiq_page.py
 
 Następnie trzeba uruchomić `scripts/00_self_test.sh`. Wygenerowanych nagłówków nie należy edytować ręcznie.
 
+## Powiązany projekt
+
+Ta sama funkcjonalność Steinel NightmatIQ Plus jest również dostępna w dedykowanym projekcie [Bramka Steinel NightmatIQ Plus dla ESP32-C3](https://github.com/supczinskib/steinel-nightmatiq-esp32-c3-gateway). Wybierz tamten projekt dla małej, samodzielnej instalacji ESP32-C3 bez funkcji RF/IR AR01V3 i pilotów ESP-RC01; wybierz to repozytorium, jeśli NightmatIQ ma być opcjonalną integracją w wielofunkcyjnej bramce AR01V3.
+
 ## Autor, licencja i bezpieczeństwo
 
 - Autor: [Bartosz Supcziński](AUTHORS.md), <bartek@env.pl>.
