@@ -386,6 +386,9 @@ class NightmatiqMesh final : public PollingComponent,
   std::vector<NetworkChoice> networks_;
   std::atomic<bool> cloud_busy_{false};
   std::atomic<CloudTaskArgs *> cloud_pending_args_{nullptr};
+  std::atomic<bool> cloud_api_shutdown_pending_{false};
+  std::atomic<bool> cloud_api_shutdown_started_{false};
+  std::atomic<uint32_t> cloud_api_shutdown_deadline_{0};
   std::atomic<bool> cloud_ble_pause_pending_{false};
   std::atomic<uint32_t> cloud_ble_pause_deadline_{0};
   std::atomic<bool> cloud_session_reboot_pending_{false};

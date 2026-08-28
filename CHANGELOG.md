@@ -4,6 +4,19 @@ All notable project changes are documented here.
 
 ## Unreleased
 
+## 1.2.2 — 2026-08-28
+
+- Released ESPHome API connections before shutting down Bluetooth and starting
+  Steinel HTTPS operations, increasing the contiguous internal heap available
+  to TLS during cloud setup.
+- Required a current-boot NightmatIQ manufacturer report before automatic Mesh
+  source-address recovery can advance to another address, preventing false RPL
+  recovery when the sensor is powered off or temporarily unreachable.
+- Configured the fallback access point to start after 60 seconds on Wi-Fi
+  channel 6 for faster and more predictable recovery.
+- Extended publication regression tests and the English and Polish NightmatIQ
+  documentation for the updated cloud and address-recovery lifecycle.
+
 ## 1.2.1 — 2026-08-24
 
 - Added an automatic, NVS-backed Bluetooth Mesh source-address policy derived

@@ -933,6 +933,7 @@ void NightmatiqMesh::advance_address_recovery_(uint32_t now) {
       this->address_recovery_attempted_this_boot_ || !this->mesh_ready_.load() ||
       !this->mesh_mode_enabled_ || this->mesh_ready_at_ == 0 ||
       static_cast<uint32_t>(now - this->mesh_ready_at_) < AUTO_ADDRESS_RECOVERY_DELAY_MS ||
+      !this->identity_found_this_boot_.load() ||
       this->mesh_tx_accepted_.load() < AUTO_ADDRESS_MIN_ACCEPTED_TX ||
       this->mesh_timeouts_.load() < AUTO_ADDRESS_MIN_TIMEOUTS ||
       this->cloud_busy_.load() || this->reboot_pending_.load() ||
@@ -2115,7 +2116,7 @@ void NightmatiqMesh::loop() {
 void NightmatiqMesh::pause_ble_for_cloud_() {
   if (this->mesh_mode_enabled_)
     return;
-  this->cloud_ble_pause_pending_.store(true);
+  this->cloud_api_shutdown_pending_.store(true);
 }
 
 }  // namespace nightmatiq_mesh

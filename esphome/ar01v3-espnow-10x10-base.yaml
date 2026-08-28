@@ -10,7 +10,7 @@ substitutions:
   # Project Name
   project_name: "envpl.ar01v3_esp_rc01_gateway"
   # Project version denotes the release version of the YAML configuration.
-  project_version: "1.2.1"
+  project_version: "1.2.2"
   # Stable identifier included in events sent to Home Assistant
   receiver_id: "ar01v3_1"
   # Define a domain for this device to use. i.e. iot.home.lan (so device will appear as athom-smart-plug-v2.iot.home.lan in DNS/DHCP logs)
@@ -786,6 +786,8 @@ wifi:
   ap:
     ssid: "${friendly_name} Fallback"
     password: !secret fallback_ap_password
+    channel: 6
+    ap_timeout: 60s
   # Allow rapid re-connection to previously connected Wi-Fi.
   fast_connect: "${wifi_fast_connect}"
   domain: "${dns_domain}"

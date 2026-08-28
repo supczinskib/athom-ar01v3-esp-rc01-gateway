@@ -46,12 +46,15 @@ configuration** action permanently erases the saved integration data.
 7. Select **Install on AR01V3**. The gateway downloads the backup over HTTPS,
    validates it, saves only the required data and reboots in Mesh mode.
 
-Large network backups are not retained in RAM. During import AR01V3 streams the
-backup into the inactive OTA slot and reads only the fields required by the
-integration. This does not change the partition table, the running image or NVS;
-the next OTA update normally overwrites that temporary workspace. Expand
-**Diagnostics** at the bottom of the page to see the last response size and the
-heap state before the cloud operation and after Bluetooth is released.
+Large network backups are not retained in RAM. During import AR01V3 closes its
+ESPHome API connections, releases Bluetooth, streams the backup into the
+inactive OTA slot and reads only the fields required by the integration. This
+does not change the partition table, the running image or NVS; the next OTA
+update normally overwrites that temporary workspace. Home Assistant therefore
+disconnects briefly during cloud setup and reconnects after the controlled
+gateway restart. Expand **Diagnostics** at the bottom of the page to see the
+last response size and the heap state before the cloud operation and after
+Bluetooth is released.
 
 The Steinel password is not written to flash or returned by the local API. The
 browser does send it to AR01V3 over local HTTP, so perform first setup only on a
@@ -74,8 +77,9 @@ reusing the previous source with a reset sequence number. This prevents a
 NightmatIQ Replay Protection List from silently rejecting otherwise valid
 messages after configuration removal, reimport, or replacement of the gateway.
 
-Automatic recovery is deliberately conservative. It starts only after Mesh has
-been ready for at least 60 seconds, the stack has accepted at least 10
+Automatic recovery is deliberately conservative. It starts only when the
+NightmatIQ manufacturer report was captured during the current gateway boot,
+Mesh has been ready for at least 60 seconds, the stack has accepted at least 10
 transmissions, at least 10 requests have timed out and no Mesh response has
 been received. It never runs during cloud setup, an active Access operation, a
 Composition Data query or a pending restart. At most 16 automatic address

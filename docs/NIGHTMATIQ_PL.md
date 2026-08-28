@@ -46,12 +46,15 @@ configuration** służy do trwałego usunięcia zapisanych danych.
 7. Wybierz **Install on AR01V3**. Bramka pobierze backup przez HTTPS, sprawdzi
    go, zapisze tylko potrzebne dane i uruchomi się ponownie w trybie Mesh.
 
-Duży backup sieci nie jest przechowywany w RAM. Podczas importu AR01V3 zapisuje
-go strumieniowo w nieaktywnym slocie OTA i odczytuje tylko pola potrzebne do
-integracji. Nie zmienia to tablicy partycji, działającego obrazu ani danych NVS;
-następna aktualizacja OTA normalnie nadpisze ten roboczy slot. Rozwijana sekcja
-**Diagnostics** na dole strony pokazuje rozmiar ostatniej odpowiedzi oraz stan
-pamięci przed operacją chmurową i po zwolnieniu Bluetooth.
+Duży backup sieci nie jest przechowywany w RAM. Podczas importu AR01V3 zamyka
+połączenia API ESPHome, zwalnia Bluetooth, zapisuje backup strumieniowo w
+nieaktywnym slocie OTA i odczytuje tylko pola potrzebne do integracji. Nie
+zmienia to tablicy partycji, działającego obrazu ani danych NVS; następna
+aktualizacja OTA normalnie nadpisze ten roboczy slot. Home Assistant rozłącza
+się więc na krótko podczas konfiguracji chmurowej i łączy ponownie po
+kontrolowanym restarcie bramki. Rozwijana sekcja **Diagnostics** na dole strony
+pokazuje rozmiar ostatniej odpowiedzi oraz stan pamięci przed operacją chmurową
+i po zwolnieniu Bluetooth.
 
 Hasło Steinel nie jest zapisywane we flash ani zwracane przez lokalne API.
 Przeglądarka wysyła je jednak do AR01V3 przez lokalny HTTP, więc pierwszą
@@ -75,11 +78,13 @@ cichemu odrzucaniu prawidłowych wiadomości przez Replay Protection List
 NightmatIQ po usunięciu konfiguracji, ponownym imporcie albo wymianie bramki.
 
 Automatyczne odzyskiwanie ma zachowawcze warunki. Uruchamia się dopiero wtedy,
-gdy Mesh jest gotowy od co najmniej 60 sekund, stos zaakceptował przynajmniej
-10 transmisji, wystąpiło co najmniej 10 timeoutów i nie odebrano żadnej
-odpowiedzi Mesh. Nie działa podczas konfiguracji chmurowej, aktywnej operacji
-Access, zapytania Composition Data ani oczekującego restartu. Dla jednego
-importu dopuszczalne jest maksymalnie 16 automatycznych zmian adresu. Każda
+gdy raport producenta NightmatIQ został odebrany podczas bieżącego uruchomienia
+bramki, Mesh jest gotowy od co najmniej 60 sekund, stos zaakceptował
+przynajmniej 10 transmisji, wystąpiło co najmniej 10 timeoutów i nie odebrano
+żadnej odpowiedzi Mesh. Nie działa podczas konfiguracji chmurowej, aktywnej
+operacji Access, zapytania Composition Data ani oczekującego restartu. Dla
+jednego importu dopuszczalne jest maksymalnie 16 automatycznych zmian adresu.
+Każda
 uwierzytelniona odpowiedź zapisuje bieżący adres w NVS jako potwierdzony i
 trwale blokuje dalsze automatyczne zmiany dla tej konfiguracji. Późniejszy
 restart przy chwilowo wyłączonym NightmatIQ nie zużyje więc następnego adresu.

@@ -22,6 +22,7 @@
 #include "esp_ota_ops.h"
 #include "esp_partition.h"
 #include "esp_system.h"
+#include "esphome/components/api/api_server.h"
 #include "esphome/core/hal.h"
 #include "esphome/core/helpers.h"
 #include "esphome/core/log.h"
@@ -36,6 +37,7 @@ static const char *const API_BASE = "https://connectapp.steinel.de/api";
 static constexpr uint32_t CLOUD_TASK_STACK_BYTES = 8192;
 static constexpr uint32_t CLOUD_ERROR_REBOOT_DELAY_MS = 20000;
 static constexpr uint32_t CLOUD_DISCOVER_SESSION_TIMEOUT_MS = 300000;
+static constexpr uint32_t CLOUD_API_SHUTDOWN_TIMEOUT_MS = 5000;
 
 #ifdef USE_NIGHTMATIQ_EXTENDED_DIAGNOSTICS
 static const char *reset_reason_name(esp_reset_reason_t reason) {
@@ -1647,10 +1649,12 @@ bool NightmatiqMesh::start_cloud_job_(CloudJob job, const std::string &email, co
     return false;
   }
 
-  this->cloud_ble_pause_deadline_.store(millis() + 7500);
+  this->cloud_api_shutdown_started_.store(false);
+  this->cloud_api_shutdown_pending_.store(true);
+  this->cloud_api_shutdown_deadline_.store(millis() + CLOUD_API_SHUTDOWN_TIMEOUT_MS);
   this->cloud_pending_args_.store(args);
   this->pause_ble_for_cloud_();
-  ESP_LOGI(WEB_TAG, "Cloud request queued until Bluetooth releases its memory");
+  ESP_LOGI(WEB_TAG, "Cloud request queued until ESPHome API and Bluetooth release their memory");
   return true;
 }
 
@@ -1658,6 +1662,39 @@ void NightmatiqMesh::advance_cloud_job_() {
   CloudTaskArgs *pending = this->cloud_pending_args_.load();
   if (pending == nullptr)
     return;
+
+  if (this->cloud_api_shutdown_pending_.load()) {
+    if (api::global_api_server != nullptr &&
+        !this->cloud_api_shutdown_started_.exchange(true)) {
+      api::global_api_server->on_shutdown();
+      ESP_LOGI(WEB_TAG, "Closing ESPHome API clients before Steinel HTTPS");
+    }
+
+    const bool api_released =
+        api::global_api_server == nullptr || api::global_api_server->teardown();
+    if (!api_released) {
+      const uint32_t deadline = this->cloud_api_shutdown_deadline_.load();
+      if (static_cast<int32_t>(millis() - deadline) < 0)
+        return;
+      pending = this->cloud_pending_args_.exchange(nullptr);
+      if (pending == nullptr)
+        return;
+      std::fill(pending->email.begin(), pending->email.end(), '\0');
+      std::fill(pending->password.begin(), pending->password.end(), '\0');
+      delete pending;
+      this->cloud_api_shutdown_pending_.store(false);
+      this->cloud_busy_.store(false);
+      this->schedule_cloud_session_reboot_(CLOUD_ERROR_REBOOT_DELAY_MS);
+      this->set_status_("Could not close Home Assistant connection for HTTPS");
+      return;
+    }
+
+    this->cloud_api_shutdown_pending_.store(false);
+    this->cloud_ble_pause_deadline_.store(millis() + 7500);
+    this->cloud_ble_pause_pending_.store(true);
+    ESP_LOGI(WEB_TAG, "ESPHome API stopped; releasing Bluetooth memory");
+    return;
+  }
 
   const bool bluetooth_released =
       esp_bt_controller_get_status() == ESP_BT_CONTROLLER_STATUS_IDLE &&

@@ -72,12 +72,14 @@ def is_generated(path: Path) -> bool:
 
 required_base = (
     'project_name: "envpl.ar01v3_esp_rc01_gateway"',
-    'project_version: "1.2.1"',
+    'project_version: "1.2.2"',
     'type: digest',
     'username: !secret web_server_username',
     'password: !secret web_server_password',
     'captive_portal:',
     'power_save_mode: NONE',
+    'channel: 6',
+    'ap_timeout: 60s',
     'bluetooth_proxy:\n  active: true',
     'connection_slots: 2',
     'filter: 50us',
@@ -276,7 +278,11 @@ for marker, source in (
     ("Configuration removal is already in progress", nightmatiq_web_source),
     ("FLAG_ENABLED | FLAG_REMOVE_PENDING", nightmatiq_web_source),
     ("CLOUD_TASK_STACK_BYTES = 8192", nightmatiq_web_source),
+    ("CLOUD_API_SHUTDOWN_TIMEOUT_MS = 5000", nightmatiq_web_source),
     ("cloud_pending_args_", nightmatiq_web_source),
+    ("global_api_server->on_shutdown()", nightmatiq_web_source),
+    ("global_api_server->teardown()", nightmatiq_web_source),
+    ("ESPHome API stopped; releasing Bluetooth memory", nightmatiq_web_source),
     ("Starting cloud task after Bluetooth release", nightmatiq_web_source),
     ("esp_bt_controller_get_status() == ESP_BT_CONTROLLER_STATUS_IDLE", nightmatiq_web_source),
     ("esp_bluedroid_get_status() == ESP_BLUEDROID_STATUS_UNINITIALIZED", nightmatiq_web_source),
@@ -419,6 +425,11 @@ start_cloud_job_block = nightmatiq_web_source.split("bool NightmatiqMesh::start_
 )[0]
 if "xTaskCreate" in start_cloud_job_block:
     errors.append("NightmatIQ HTTPS task must be created only after Bluetooth has released memory")
+address_recovery_block = nightmatiq_mesh_source.split(
+    "void NightmatiqMesh::advance_address_recovery_", 1
+)[1].split("void NightmatiqMesh::keys_bound_", 1)[0]
+if "!this->identity_found_this_boot_.load()" not in address_recovery_block:
+    errors.append("automatic Mesh address recovery must require a current-boot NightmatIQ report")
 
 # Exercise the pure address-selection rules independently of the embedded
 # runtime. This catches off-by-one errors at 0x7FFF, occupied element ranges,
@@ -577,6 +588,7 @@ required_files = (
     ".github/releases/v1.1.0.md",
     ".github/releases/v1.1.1.md", ".github/releases/v1.1.2.md",
     ".github/releases/v1.2.0.md", ".github/releases/v1.2.1.md",
+    ".github/releases/v1.2.2.md",
     "home-assistant/blueprints/automation/envpl/esp_rc01_remote_actions.yaml",
     "home-assistant/nightmatiq_dashboard_card.yaml",
     "docs/NIGHTMATIQ.md", "docs/NIGHTMATIQ_PL.md",
