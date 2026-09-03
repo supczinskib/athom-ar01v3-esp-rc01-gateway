@@ -4,6 +4,32 @@ All notable project changes are documented here.
 
 ## Unreleased
 
+## 1.2.3 — 2026-09-03
+
+- Replaced the secrets-only helper with one interactive installation
+  configurator that preserves current masked credentials when Enter is pressed.
+- Preserved unknown existing `secrets.yaml` keys and added explicit review or
+  replacement of the OTA and fallback access-point passwords.
+- Added a compact three-column selector containing every supported native
+  ESPHome `climate_ir` platform, with Coolix retained as the compatibility
+  default and no technical platform identifiers to enter manually.
+- Added a disabled climate profile that omits the native climate component from
+  firmware for receivers that do not use it.
+- Assigned native climate control to a separate Home Assistant sub-device
+  named after the selected brand, with the standard `mdi:air-conditioner` icon.
+- Added a Fujitsu vertical-vane-only profile with Off and Vertical swing modes
+  plus a separate stateless `SET` button for stepping the vane position.
+- Placed native climate control and its optional `SET` button in a dedicated
+  device web-interface section, without redundant sub-device prefixes.
+- Added the installed project firmware version to the device web-interface
+  diagnostics without publishing another Home Assistant entity.
+- Kept climate choices in a separate Git-ignored local configuration and made
+  validation, compilation, upload, and logs consistently apply them.
+- Made the configurator select and remember one target receiver, so later
+  compile, USB, OTA, and log commands show that selection without asking for or
+  repeating its number.
+- Updated English and Polish installation and climate documentation.
+
 ## 1.2.2 — 2026-08-28
 
 - Released ESPHome API connections before shutting down Bluetooth and starting

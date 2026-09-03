@@ -11,6 +11,12 @@ source "$ROOT_DIR/scripts/lib.sh"
 
 ESPHOME_BIN="$(find_esphome)" || exit 1
 require_secrets "$ROOT_DIR" || exit 1
+SELECTED_RECEIVER="$(selected_device_number "$ROOT_DIR")" || exit 1
+
+echo
+print_selected_configuration "$ROOT_DIR" "$SELECTED_RECEIVER" || exit 1
+echo 'Validation scope: all receiver configurations'
+echo
 
 cd "$ROOT_DIR/esphome" || exit 1
 PASSED=0
@@ -20,8 +26,9 @@ for n in $(seq -w 1 10); do
   config="ar01v3-$n.yaml"
   output="$(mktemp)"
   echo "=== Validating AR01V3 $n ==="
+  prepare_climate_args "$ROOT_DIR" "$n" || exit 1
 
-  if "$ESPHOME_BIN" config "$config" >"$output" 2>&1; then
+  if "$ESPHOME_BIN" "${ESPHOME_CLIMATE_ARGS[@]}" config "$config" >"$output" 2>&1; then
     grep -E '^(WARNING|ERROR)' "$output" || true
     echo "OK: $config"
     PASSED=$((PASSED + 1))

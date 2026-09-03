@@ -13,7 +13,7 @@ Steinel NightmatIQ Plus <-> Bluetooth Mesh <-> bramka AR01V3 -> Home Assistant
 
 Społecznościowy firmware ESPHome, który przekształca oparty na ESP32 Athom AR01V3 w lokalną bramkę RF, IR i ESP-NOW. Zapewnia 16 trwałych slotów RF i 10 trwałych slotów IR, zdalne programowanie sygnałów przez sieć, standardowe encje przycisków Home Assistant, parametryzowane i wygodne w GUI akcje nadawania oraz obsługę do 10 pilotów ESP-RC01 przez maksymalnie 10 odbiorników AR01V3. Każdy przycisk ESP-RC01 może zostać przekazany do Home Assistant albo bezpośrednio przypisany do zapisanego slotu IR/RF, co umożliwia autonomiczne działanie bez dostępnego Home Assistant. Zapisane polecenia można również przypisywać do wirtualnych urządzeń, skryptów, scen i automatyzacji bez zahardkodowanych mapowań sprzętu.
 
-Wersja 1.2.2 poprawia opcjonalną integrację ze Steinel IS Digi NM 2E6915 NightmatIQ Plus przez zwolnienie pamięci API ESPHome i Bluetooth przed operacjami HTTPS do chmury, wymaganie raportu czujnika z bieżącego uruchomienia przed automatycznym odzyskiwaniem adresu Mesh oraz uruchamianie awaryjnego punktu dostępowego po 60 sekundach na kanale 6. RF, IR, ESP-NOW, import Flippera, Bluetooth Proxy i OTA pozostają dostępne w tym samym firmware.
+Wersja 1.2.3 dodaje jeden interaktywny konfigurator instalacji oraz wybór natywnej klimatyzacji IR osobno dla każdego odbiornika. Dotychczasowe instalacje zachowują Coolix, dopóki nie zostanie wybrana inna obsługiwana platforma ESPHome `climate_ir`; nieużywaną encję klimatyzacji można całkowicie wyłączyć. Konfigurator pozwala przejrzeć Wi-Fi i dane dostępu bez zastępowania istniejących, zamaskowanych haseł.
 
 Autor i opiekun projektu: **Bartosz Supcziński** — <bartek@env.pl>
 
@@ -101,6 +101,19 @@ Chroniona strona `/steinel` importuje wybraną sieć Steinel, steruje opcjonalny
 - Import plików `.ir` w formacie parsed NEC, parsed NECext i raw.
 - Sygnały nauczone, zaimportowane, zapisane w slotach i przekazane bezpośrednio z HA korzystają z tej samej ścieżki nadawczej.
 
+### Opcjonalne natywne sterowanie klimatyzacją IR
+
+- Konfigurator pokazuje wszystkie obsługiwane natywne protokoły klimatyzacji IR jako numerowane pozycje w zwartej tabeli z trzema kolumnami; nie trzeba ręcznie wpisywać identyfikatora platformy.
+- Dostępne są: Disabled, Ballu, Coolix, Daikin, Daikin ARC, Daikin BRC, Delonghi, Emmeti, dwa warianty Fujitsu General, Hitachi AC344, Hitachi AC424, LG, Midea, Mitsubishi, Noblex, TCL112, Toshiba, Whirlpool, Whynter i ZH/LT-01.
+- Encja klimatyzacji trafia do osobnego podurządzenia Home Assistant nazwanego wybraną marką, na przykład **Fujitsu** albo **Coolix**, i używa standardowej ikony `mdi:air-conditioner`.
+- Na stronie WWW urządzenia sterowanie klimatyzacją i opcjonalny bezstanowy przycisk **SET** znajdują się razem w osobnej sekcji nazwanej wybraną marką; nie są mieszane z **Sensor and Control**.
+- Coolix pozostaje ustawieniem domyślnym dla zgodności z dotychczasowymi instalacjami.
+- Home Assistant przekazuje żądany stan klimatyzacji do AR01V3, a wybrany protokół ESPHome generuje i nadaje ramkę IR bez używania trwałego slotu.
+- Jeżeli wybrany protokół rozpozna zgodny oryginalny pilot, odbiornik IR w AR01V3 może zaktualizować przyjęty stan klimatyzacji w Home Assistant.
+- Sterowanie IR jest jednokierunkowe: nieodebrana transmisja oryginalnego pilota lub polecenie wysłane poza zasięgiem odbiornika AR01V3 może pozostawić w HA stan różniący się od rzeczywistego.
+- **Fujitsu General** udostępnia pełny zestaw trybów ruchu żaluzji zaimplementowany w ESPHome. **Fujitsu General - vertical vane only** udostępnia wyłącznie Wyłączono i Ruch pionowy oraz osobny bezstanowy przycisk **SET**, który przesuwa pionową żaluzję o jeden fizyczny krok. Polecenie SET nie ma stanu położenia do pokazania.
+- Urządzenia Fuji Electric i Fujitsu General korzystające ze standardowego formatu ramek Fujitsu mogą użyć jednego z dwóch profili Fujitsu; zgodność nadal trzeba potwierdzić na docelowym klimatyzatorze.
+
 ### Import z Flippera
 
 - Chroniona hasłem strona `http://ADRES_URZĄDZENIA/flipper`.
@@ -147,7 +160,7 @@ Wbudowany interfejs WWW korzysta z uwierzytelniania HTTP Digest, ale nie zapewni
 - Aktualizacja firmware przez przeglądarkę.
 - Bluetooth Proxy z dwoma slotami połączeń.
 - Diagnostyka Wi-Fi, uptime, restart, safe mode, factory reset, awaryjny punkt dostępowy i dioda statusu.
-- Encje klimatyzacji IR odziedziczone z konfiguracji bazowej.
+- Opcjonalne natywne sterowanie klimatyzacją IR wybierane osobno dla każdego odbiornika.
 
 ### Opcjonalna integracja Steinel NightmatIQ Plus
 
@@ -220,24 +233,36 @@ sudo bash scripts/01_install_esphome.sh
 
 Powstanie środowisko `/opt/esphome-10x10`. Jeżeli ESPHome jest zainstalowany gdzie indziej, przed uruchamianiem skryptów można ustawić zmienną `ESPHOME` na ścieżkę do jego programu wykonywalnego.
 
-## 2. Hasła i Wi-Fi
+## 2. Konfiguracja instalacji
 
 ```bash
-bash scripts/02_configure_secrets.sh
+bash scripts/02_configure.sh 03
 ```
 
-Należy podać:
+Argument wybiera konfigurację fizycznego AR01V3 używaną później przez polecenia
+kompilacji, wgrywania i logów. Konfigurator pokazuje bieżące wartości, a Enter
+pozostawia je bez zmian. Hasła są prezentowane wyłącznie jako `********`; Enter
+zachowuje rzeczywistą wartość zapisaną wcześniej w pliku. Konfigurator obejmuje:
 
 - SSID i hasło Wi-Fi 2,4 GHz;
 - login do lokalnego panelu WWW;
 - hasło panelu mające 12-63 znaki;
-- opcjonalnie osobne hasło awaryjnego AP. Enter ustawia hasło panelu WWW.
+- opcjonalnie osobne hasło awaryjnego AP;
+- natywny profil klimatyzacji IR wybranego odbiornika.
 
-Skrypt tworzy `esphome/secrets.yaml`, generuje i zachowuje mocne hasło OTA, a dla awaryjnego AP domyślnie używa hasła panelu WWW. Osobne hasło AP jest zapisywane tylko po jego wpisaniu i powtórzeniu. Plik otrzymuje prawa `0600`, jest ignorowany przez Git i nie wolno go publikować ani przesyłać innym osobom.
+Skrypt tworzy lub aktualizuje `esphome/secrets.yaml`, zachowuje nieznane
+istniejące klucze i ustawia prawa `0600`. Wybrany numer odbiornika i ustawienia
+klimatyzacji trafiają osobno do `esphome/climate.local.json`. Oba pliki lokalne
+są ignorowane przez Git. Wyświetlane gwiazdki nigdy nie zastępują istniejącego
+hasła.
 
-Przy konfiguracji ręcznej należy skopiować `esphome/secrets.example.yaml` jako `esphome/secrets.yaml` i zastąpić wszystkie wartości przykładowe.
+Przy konfiguracji ręcznej należy skopiować `esphome/secrets.example.yaml` jako
+`esphome/secrets.yaml` i zastąpić wszystkie wartości przykładowe, a następnie
+mimo to uruchomić `scripts/02_configure.sh NUMER_URZĄDZENIA`, aby wybrać
+odbiornik i sprawdzić jego profil klimatyzacji. Konfiguracje bez zapisanego
+wyboru zachowują opublikowane ustawienie domyślne Coolix.
 
-## 3. Wybór odbiornika
+## 3. Dostosowanie wybranego odbiornika
 
 Każdy fizyczny AR01V3 otrzymuje osobny plik:
 
@@ -245,7 +270,12 @@ Każdy fizyczny AR01V3 otrzymuje osobny plik:
 - drugi: `esphome/ar01v3-02.yaml`;
 - kolejne do `ar01v3-10.yaml`.
 
-Każdy ma unikalną nazwę ESPHome i `receiver_id`. Nie należy wgrywać tego samego numeru do dwóch aktywnych urządzeń. Można zmienić `friendly_name`, `room` i `timezone`, zachowując unikalne `name` i `receiver_id`. Domyślna wersja publiczna używa `UTC` i pustego obszaru.
+Każdy ma unikalną nazwę ESPHome i `receiver_id`. Numer wybrany przez
+`scripts/02_configure.sh` jest zapamiętywany lokalnie; późniejsze polecenia go
+wyświetlają, ale nie pytają o niego ponownie. Nie należy wgrywać tego samego
+numeru do dwóch aktywnych urządzeń. Można zmienić `friendly_name`, `room` i
+`timezone`, zachowując unikalne `name` i `receiver_id`. Domyślna wersja
+publiczna używa `UTC` i pustego obszaru.
 
 ## 4. Walidacja
 
@@ -273,10 +303,10 @@ Poprawna walidacja nie potwierdza zasięgu RF ani zgodności z konkretnym sprzę
 
 ## 5. Kompilacja
 
-Dla odbiornika 01:
+Dla odbiornika wybranego podczas konfiguracji:
 
 ```bash
-bash scripts/04_compile_one.sh 01
+bash scripts/04_compile_one.sh
 ```
 
 Skrypt wypisze ścieżki do utworzonych plików `firmware.factory.bin`, `firmware.bin` i/lub `firmware.ota.bin`. Wszystkie konfiguracje należy kompilować tylko wtedy, gdy rzeczywiście potrzebne jest dziesięć obrazów:
@@ -296,7 +326,7 @@ bash scripts/08_list_serial_ports.sh
 Następnie użyj dokładnej ścieżki `/dev/serial/by-id/...` pokazanej przez skrypt:
 
 ```bash
-sudo bash scripts/09_upload_usb.sh 01 /dev/serial/by-id/WŁAŚCIWY_PORT
+sudo bash scripts/09_upload_usb.sh /dev/serial/by-id/WŁAŚCIWY_PORT
 ```
 
 ESPHome w razie potrzeby skompiluje i wgra właściwy obraz szeregowy. Nie wolno odłączać zasilania w czasie zapisu. Brak portu zwykle oznacza przewód bez danych, problem z uprawnieniami albo zajęcie portu przez inny program.
@@ -306,16 +336,19 @@ ESPHome w razie potrzeby skompiluje i wgra właściwy obraz szeregowy. Nie wolno
 Po pierwszej instalacji USB można używać natywnego, chronionego hasłem OTA ESPHome:
 
 ```bash
-bash scripts/05_upload_ota.sh 01 ar01v3-espnow-01.local
+bash scripts/05_upload_ota.sh
 ```
 
-Zamiast nazwy `.local` można podać IP. Numer konfiguracji musi odpowiadać numerowi wgranym do danego urządzenia.
+Skrypt używa nazwy `.local` zapamiętanego odbiornika. Jako jedyny opcjonalny
+argument można podać adres IP albo inną nazwę hosta. Przed wgraniem skrypt
+wyświetla odbiornik, profil klimatyzacji, plik konfiguracji i cel OTA, ale nie
+pyta ponownie o numer.
 
 ## 8. Aktualizacja przez stronę WWW
 
 1. Skompiluj konfigurację właściwego odbiornika skryptem `scripts/04_compile_one.sh`.
 2. Otwórz `http://ADRES_URZĄDZENIA/`.
-3. Zaloguj się danymi ustawionymi w `scripts/02_configure_secrets.sh`.
+3. Zaloguj się danymi ustawionymi w `scripts/02_configure.sh`.
 4. Znajdź sekcję **OTA Update**.
 5. Wybierz pasujący plik `firmware.bin` albo `firmware.ota.bin` pokazany po kompilacji.
 6. Uruchom aktualizację i poczekaj na restart.
@@ -325,8 +358,10 @@ Nie wolno używać `firmware.factory.bin` do OTA — jest przeznaczony do pierws
 ## 9. Logi
 
 ```bash
-bash scripts/10_logs.sh 01 ar01v3-espnow-01.local
+bash scripts/10_logs.sh
 ```
+
+Adres IP albo nazwę hosta można podać jako jedyny opcjonalny argument.
 
 Firmware wyłącza logowanie na UART (`baud_rate: 0`), dlatego należy używać logów sieciowych API.
 
@@ -339,6 +374,8 @@ Po wejściu na `http://ADRES_URZĄDZENIA/` i zalogowaniu dostępne są:
 - podgląd wszystkich slotów;
 - powtórzenia RF i przerwa pomiędzy nimi;
 - parowanie ESP-RC01, bateria, MAC, diagnostyka pakietów oraz trwałe przypisania przycisków do slotów;
+- natywne sterowanie klimatyzacją w osobnej sekcji nazwanej marką, jeżeli jest włączone;
+- numer zainstalowanej wersji firmware projektu w diagnostyce WWW;
 - restart, safe mode, factory reset i diagnostyka;
 - pozycja **Flipper Import Page — PRESS**, otwierająca `/flipper`.
 
@@ -387,7 +424,7 @@ Import do zajętego slotu zastępuje poprzedni rekord. Oryginalne pliki warto za
 
 Główne urządzenie jest widoczne jako **Athom RF IR Remote**. Home Assistant może osobno pokazać **AR01V3 Stored Signal Actions**. To celowe podurządzenie z 26 przyciskami przygotowanymi do użycia w wirtualnych urządzeniach, skryptach, scenach i automatyzacjach.
 
-Jeżeli po aktualizacji firmware przycisków nie widać, przeładuj integrację ESPHome lub uruchom ponownie Home Assistant i sprawdź wersję projektu `1.2.2`.
+Jeżeli po aktualizacji firmware przycisków nie widać, przeładuj integrację ESPHome lub uruchom ponownie Home Assistant i sprawdź wersję projektu `1.2.3`.
 
 ### Wywołanie zapisanego slotu w GUI
 
@@ -604,7 +641,7 @@ Zdarzenie pilota zawiera również `sequence`, `button_code`, `battery`, `remote
 
 ### Akcji nie widać w HA
 
-- Sprawdź połączenie integracji ESPHome i wersję projektu `1.2.2`.
+- Sprawdź połączenie integracji ESPHome i wersję projektu `1.2.3`.
 - Po aktualizacji firmware przeładuj integrację ESPHome lub zrestartuj HA.
 - Dla slotów wybierz akcję **Przycisk: Naciśnij** i encję `Send IR Slot N` albo `Send RF Slot N`; sensor podglądu nie nadaje.
 - Akcje bezpośrednie zaczynają się od `esphome.<nazwa_węzła>_transmit_...`.

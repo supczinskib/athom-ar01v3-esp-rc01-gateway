@@ -10,7 +10,7 @@ substitutions:
   # Project Name
   project_name: "envpl.ar01v3_esp_rc01_gateway"
   # Project version denotes the release version of the YAML configuration.
-  project_version: "1.2.2"
+  project_version: "1.2.3"
   # Stable identifier included in events sent to Home Assistant
   receiver_id: "ar01v3_1"
   # Define a domain for this device to use. i.e. iot.home.lan (so device will appear as athom-smart-plug-v2.iot.home.lan in DNS/DHCP logs)
@@ -29,10 +29,6 @@ substitutions:
   log_level: "INFO"
   # Enable or disable the use of IPv6 networking on the device
   ipv6_enable: "false"
-  # valid value: ballu, coolix, daikin, daikin_arc, daikin_brc, delonghi, emmeti, fujitsu_general, gree, hitachi_ac344, hitachi_ac424, climate_ir_lg, midea_ir, mitsubishi, noblex, tcl112, toshiba, whirlpool, yashima, whynter, zhlt01, heatpumpir
-  # https://esphome.io/components/climate/climate_ir/
-  AC_Platform_name: "coolix"
-
 #########################GPIO######################
   RF_RX_PIN: GPIO19
   RF_TX_PIN: GPIO18
@@ -52,6 +48,8 @@ esphome:
       name: "AR01V3 Stored Signal Actions"
     - id: nightmatiq_device
       name: "Steinel NightmatIQ Plus"
+    - id: climate_device
+      name: "${AC_Device_name}"
   name_add_mac_suffix: false
   min_version: 2026.7.3
   project:
@@ -62,6 +60,9 @@ esphome:
   on_boot:
     - priority: -100
       then:
+        - text_sensor.template.publish:
+            id: firmware_version
+            state: "${project_version}"
         - script.execute: espnow_restore_peers
         - lambda: |-
             id(signal_select_index) = std::clamp(id(signal_select_index), 0, 9);
@@ -753,6 +754,9 @@ web_server:
   # entity listing to reduce heap use during Home Assistant discovery.
   include_internal: true
   sorting_groups:
+    - id: group_climate
+      name: "${AC_Device_name}"
+      sorting_weight: 2
     - id: group_remote_actions
       name: "ESP-RC01 Button Assignment"
       sorting_weight: 3
@@ -1210,7 +1214,7 @@ external_components:
   - source:
       type: local
       path: components
-    components: [Flash_comp, flipper_importer, nightmatiq_mesh]
+    components: [Flash_comp, flipper_importer, fujitsu_vertical, nightmatiq_mesh]
 
 remote_receiver:
   - pin:
@@ -1336,13 +1340,6 @@ radio_frequency:
     id: rf_proxy_receiver
     frequency: 433.92MHz
     remote_receiver_id: rf_receiver
-
-climate:
-  - id: "AC"
-    name: "AC"
-    platform: ${AC_Platform_name}
-    transmitter_id: ir_transmitter
-    receiver_id: ir_receiver
 
 binary_sensor:
   - platform: template
@@ -2167,6 +2164,14 @@ event:
     event_types: *espnow_button_event_types
 
 text_sensor:
+  - platform: template
+    id: firmware_version
+    name: "Firmware Version"
+    icon: mdi:chip
+    entity_category: diagnostic
+    internal: true
+    update_interval: never
+
   - platform: template
     id: nightmatiq_firmware_version
     name: "NightmatIQ Installed Firmware"

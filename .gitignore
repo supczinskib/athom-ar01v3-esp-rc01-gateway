@@ -1,6 +1,7 @@
 # ESPHome build output and local secrets
 esphome/.esphome/
 esphome/secrets.yaml
+esphome/climate.local.json
 *.bin
 *.elf
 *.map
@@ -21,4 +22,3 @@ Thumbs.db
 *.log
 *.backup-*
 *.bak
-

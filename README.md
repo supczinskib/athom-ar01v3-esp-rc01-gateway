@@ -13,7 +13,7 @@ Steinel NightmatIQ Plus <-> Bluetooth Mesh <-> AR01V3 gateway -> Home Assistant
 
 Community ESPHome firmware that turns the ESP32-based Athom AR01V3 into a local RF, IR, and ESP-NOW gateway. It provides 16 persistent RF slots and 10 persistent IR slots, remote signal provisioning over the network, standard Home Assistant button entities, parameterized and GUI-friendly transmission actions, and support for up to 10 ESP-RC01 remotes across up to 10 AR01V3 receivers. Each ESP-RC01 button can either be routed to Home Assistant or assigned directly to a stored IR/RF slot, allowing autonomous operation when Home Assistant is unavailable. The stored commands can also be assigned to virtual devices, scripts, scenes, and automations without hard-coded appliance mappings.
 
-Version 1.2.2 improves the optional Steinel IS Digi NM 2E6915 NightmatIQ Plus integration by releasing ESPHome API and Bluetooth memory before cloud HTTPS operations, requiring a current-boot sensor report before automatic Mesh address recovery, and starting the fallback access point after 60 seconds on channel 6. RF, IR, ESP-NOW, Flipper import, Bluetooth Proxy, and OTA remain available in the same firmware.
+Version 1.2.3 adds one interactive installation configurator and per-receiver native IR climate selection. Existing installations retain Coolix unless another supported ESPHome `climate_ir` platform is selected, while new or unused climate entities can be disabled completely. Wi-Fi and access credentials, including existing masked passwords, can be reviewed without replacing them.
 
 Author and maintainer: **Bartosz Supcziński** — <bartek@env.pl>
 
@@ -101,6 +101,19 @@ The authenticated `/steinel` page imports a selected Steinel network, controls t
 - Parsed NEC, parsed NECext, and raw Flipper `.ir` files can be imported.
 - Learned, imported, stored, and directly supplied Home Assistant signals use the same transmitter path.
 
+### Optional native IR climate control
+
+- The configurator presents all supported native IR climate protocols as numbered choices in a compact three-column menu; no platform identifier has to be entered manually.
+- The available choices are Disabled, Ballu, Coolix, Daikin, Daikin ARC, Daikin BRC, Delonghi, Emmeti, two Fujitsu General variants, Hitachi AC344, Hitachi AC424, LG, Midea, Mitsubishi, Noblex, TCL112, Toshiba, Whirlpool, Whynter and ZH/LT-01.
+- The climate entity is assigned to its own Home Assistant sub-device named after the selected brand, for example **Fujitsu** or **Coolix**, and uses the standard `mdi:air-conditioner` icon.
+- On the device web interface, climate control and the optional stateless **SET** button appear together in a separate section named after the selected brand; they are not mixed into **Sensor and Control**.
+- Coolix remains the default for compatibility with existing installations.
+- Home Assistant sends a requested climate state to AR01V3; the selected ESPHome protocol generates and transmits the IR frame without using a persistent IR slot.
+- When the configured protocol recognizes a compatible original remote, the AR01V3 IR receiver can update the assumed climate state in Home Assistant.
+- Infrared control is one-way: a missed original-remote transmission or an IR command sent outside the AR01V3 receiver's range can leave the Home Assistant state out of sync with the appliance.
+- **Fujitsu General** exposes the complete swing-mode set implemented by ESPHome. **Fujitsu General - vertical vane only** exposes only Off and Vertical and adds a separate stateless **SET** button that advances the vertical vane by one physical step. The SET command has no position state to report.
+- Fuji Electric and Fujitsu General units using the standard Fujitsu frame format can use either Fujitsu profile; compatibility must still be verified on the target appliance.
+
 ### Flipper-compatible import page
 
 - Authenticated page at `http://DEVICE_ADDRESS/flipper`.
@@ -147,7 +160,7 @@ The embedded web interface uses HTTP Digest authentication but does not provide 
 - Browser-based firmware OTA upload.
 - Bluetooth Proxy with two connection slots.
 - Wi-Fi diagnostics, uptime, restart, safe mode, factory reset, fallback access point, and status LED.
-- Infrared climate proxy entities from the upstream configuration.
+- Optional native infrared climate control selected independently for each receiver.
 
 ### Optional Steinel NightmatIQ Plus integration
 
@@ -222,26 +235,39 @@ sudo bash scripts/01_install_esphome.sh
 
 This creates `/opt/esphome-10x10`. If ESPHome is already installed elsewhere, set the `ESPHOME` environment variable to its executable before using the helper scripts.
 
-## 2. Configure secrets
+## 2. Configure the installation
 
 Run:
 
 ```bash
-bash scripts/02_configure_secrets.sh
+bash scripts/02_configure.sh 03
 ```
 
-Enter:
+The argument selects the physical AR01V3 configuration used by the subsequent
+compile, upload, and log commands. The configurator shows the current values
+and accepts Enter without changing them. Passwords are displayed only as
+`********`; pressing Enter preserves the real value already stored in the
+file. It configures:
 
 - the 2.4 GHz Wi-Fi SSID and password;
 - the local web-interface username;
 - a web password of 12-63 characters;
-- optionally, a separate fallback-AP password. Press Enter to reuse the web password.
+- optionally, a separate fallback-AP password;
+- the native IR climate profile for the selected receiver.
 
-The script creates `esphome/secrets.yaml`, generates and preserves a strong OTA password, uses the web password for the fallback AP unless a separate password is entered, and sets file mode `0600`. This file is ignored by Git. Never commit or share it.
+The script creates or updates `esphome/secrets.yaml`, preserves unknown existing
+keys, and stores it with mode `0600`. The selected receiver and climate choices
+are stored separately in `esphome/climate.local.json`. Both local files are
+ignored by Git. Existing credentials are never replaced with the displayed
+asterisks.
 
-For a manual setup, copy `esphome/secrets.example.yaml` to `esphome/secrets.yaml` and replace every placeholder.
+For a manual setup, copy `esphome/secrets.example.yaml` to
+`esphome/secrets.yaml` and replace every placeholder, then still run
+`scripts/02_configure.sh DEVICE_NUMBER` to select the receiver and review its
+climate profile. Receiver configurations without a saved climate choice retain
+the published Coolix default.
 
-## 3. Select and customize a receiver configuration
+## 3. Customize the selected receiver configuration
 
 Use one entry-point file per physical AR01V3:
 
@@ -249,7 +275,11 @@ Use one entry-point file per physical AR01V3:
 - second unit: `esphome/ar01v3-02.yaml`;
 - continue through `ar01v3-10.yaml`.
 
-Each file has a unique ESPHome node name and `receiver_id`. Do not flash the same receiver number to two active devices. You may change `friendly_name`, `room`, and `timezone`; keep `name` and `receiver_id` unique. The publication defaults use `UTC` and no area.
+Each file has a unique ESPHome node name and `receiver_id`. The receiver chosen
+by `scripts/02_configure.sh` is remembered locally; later commands display that
+choice but do not ask for it again. Do not flash the same receiver number to two
+active devices. You may change `friendly_name`, `room`, and `timezone`; keep
+`name` and `receiver_id` unique. The publication defaults use `UTC` and no area.
 
 ## 4. Validate before flashing
 
@@ -277,10 +307,10 @@ Validation does not prove RF range or compatibility with a particular appliance.
 
 ## 5. Compile firmware
 
-Compile one receiver, for example receiver 01:
+Compile the receiver selected during configuration:
 
 ```bash
-bash scripts/04_compile_one.sh 01
+bash scripts/04_compile_one.sh
 ```
 
 The script prints the generated `firmware.factory.bin`, `firmware.bin`, and/or `firmware.ota.bin` paths. Compile all ten configurations only when you actually need all ten images:
@@ -297,10 +327,10 @@ Connect the AR01V3 with a data-capable USB-C cable. List detected ports:
 bash scripts/08_list_serial_ports.sh
 ```
 
-Then flash the chosen receiver number using the exact `/dev/serial/by-id/...` path shown by the previous command:
+Then flash the selected receiver using the exact `/dev/serial/by-id/...` path shown by the previous command:
 
 ```bash
-sudo bash scripts/09_upload_usb.sh 01 /dev/serial/by-id/REPLACE_WITH_YOUR_PORT
+sudo bash scripts/09_upload_usb.sh /dev/serial/by-id/REPLACE_WITH_YOUR_PORT
 ```
 
 The ESPHome command performs compilation when necessary and uploads the correct serial image. Do not disconnect power while flash is being written. If no port appears, check the cable, USB permissions, and whether another process is using the port.
@@ -310,16 +340,19 @@ The ESPHome command performs compilation when necessary and uploads the correct 
 After the first successful USB installation, use native password-protected ESPHome OTA:
 
 ```bash
-bash scripts/05_upload_ota.sh 01 ar01v3-espnow-01.local
+bash scripts/05_upload_ota.sh
 ```
 
-An IP address may be used instead of the `.local` name. The receiver number must match the firmware already assigned to that physical unit.
+The script uses the selected receiver's `.local` name. An IP address or another
+hostname may be supplied as its only optional argument. Before uploading it
+prints the selected receiver, climate profile, configuration file, and target;
+it does not ask for the receiver again.
 
 ## 8. Updating from the device web page
 
 1. Compile the matching receiver configuration with `scripts/04_compile_one.sh`.
 2. Open `http://DEVICE_ADDRESS/`.
-3. Sign in with the web credentials created by `scripts/02_configure_secrets.sh`.
+3. Sign in with the web credentials configured by `scripts/02_configure.sh`.
 4. Find **OTA Update**.
 5. Select the matching `firmware.bin` or `firmware.ota.bin` shown by the compile script.
 6. Start the update and wait for the device to reboot.
@@ -328,11 +361,13 @@ Never upload `firmware.factory.bin` through OTA; that image is for an initial se
 
 ## 9. Logs and diagnostics
 
-Read network logs for receiver 01:
+Read network logs from the selected receiver:
 
 ```bash
-bash scripts/10_logs.sh 01 ar01v3-espnow-01.local
+bash scripts/10_logs.sh
 ```
+
+An IP address or hostname may be supplied as the only optional argument.
 
 The firmware disables serial logger output (`baud_rate: 0`) to avoid conflicts with the device design. Use API/network logs.
 
@@ -345,6 +380,8 @@ Open `http://DEVICE_ADDRESS/` and authenticate. The main page provides:
 - preview rows for every IR and RF slot;
 - RF repeat and repeat-gap controls;
 - ESP-RC01 pairing, battery, MAC, recent packet diagnostics, and persistent button-to-slot assignments;
+- native climate control in a separate brand-named section when it is enabled;
+- the installed project firmware version under web diagnostics;
 - restart, safe mode, factory reset, and diagnostics;
 - a **Flipper Import Page — PRESS** entry that opens `/flipper`.
 
@@ -393,7 +430,7 @@ Importing into an occupied slot replaces its previous record. Keep original sign
 
 The primary device appears as **Athom RF IR Remote**. Home Assistant may show **AR01V3 Stored Signal Actions** as a second sub-device. This is intentional: the second device contains the 26 GUI buttons designed for virtual devices, scripts, scenes, and automations.
 
-If those buttons do not appear after a firmware update, reload the ESPHome integration or restart Home Assistant. Confirm that the device reports project version `1.2.2`.
+If those buttons do not appear after a firmware update, reload the ESPHome integration or restart Home Assistant. Confirm that the device reports project version `1.2.3`.
 
 ### Use a stored slot in the GUI
 
@@ -618,7 +655,7 @@ The pilot-specific event also includes `sequence`, `button_code`, `battery`, `re
 
 ### Home Assistant action search is empty
 
-- Confirm the ESPHome integration is connected and the receiver runs version `1.2.2`.
+- Confirm the ESPHome integration is connected and the receiver runs version `1.2.3`.
 - Reload the ESPHome integration or restart Home Assistant after a firmware upgrade that adds actions.
 - For stored signals, search for **Button: Press** and select a `Send IR Slot N` or `Send RF Slot N` entity. Do not search for the preview sensor.
 - Direct actions begin with `esphome.<node_name>_transmit_...`.

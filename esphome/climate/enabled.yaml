@@ -1,0 +1,11 @@
+climate:
+  - id: AC
+    name: None
+    device_id: climate_device
+    icon: mdi:air-conditioner
+    platform: ${AC_Platform_name}
+    transmitter_id: ir_transmitter
+    receiver_id: ir_receiver
+    web_server:
+      sorting_group_id: group_climate
+      sorting_weight: 10

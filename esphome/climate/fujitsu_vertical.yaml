@@ -1,0 +1,22 @@
+climate:
+  - id: AC
+    name: None
+    device_id: climate_device
+    icon: mdi:air-conditioner
+    platform: fujitsu_vertical
+    transmitter_id: ir_transmitter
+    receiver_id: ir_receiver
+    web_server:
+      sorting_group_id: group_climate
+      sorting_weight: 10
+
+button:
+  - platform: template
+    name: "SET"
+    device_id: climate_device
+    icon: mdi:arrow-down-bold
+    web_server:
+      sorting_group_id: group_climate
+      sorting_weight: 20
+    on_press:
+      - lambda: id(AC).transmit_nudge();

@@ -4,6 +4,10 @@ substitutions:
   receiver_id: "ar01v3_10"
   room: ""
   timezone: "UTC"
+  climate_profile: "enabled"
+  AC_Platform_name: "coolix"
+  AC_Device_name: "Coolix"
 
 packages:
   ar01v3_espnow_10x10: !include ar01v3-espnow-10x10-base.yaml
+  climate: !include climate/${climate_profile}.yaml

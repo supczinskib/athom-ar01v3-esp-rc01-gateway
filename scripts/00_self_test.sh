@@ -47,7 +47,33 @@ for n in $(seq -w 1 10); do
     || fail "invalid node name in ar01v3-$n.yaml"
   grep -Fq "receiver_id: \"ar01v3_$n\"" "$cfg" \
     || fail "invalid receiver ID in ar01v3-$n.yaml"
+  grep -Fq 'climate_profile: "enabled"' "$cfg" \
+    || fail "missing default climate profile in ar01v3-$n.yaml"
+  grep -Fq 'AC_Platform_name: "coolix"' "$cfg" \
+    || fail "missing Coolix compatibility default in ar01v3-$n.yaml"
+  grep -Fq 'AC_Device_name: "Coolix"' "$cfg" \
+    || fail "missing Coolix Home Assistant device-name default in ar01v3-$n.yaml"
+  grep -Fq 'climate: !include climate/${climate_profile}.yaml' "$cfg" \
+    || fail "missing dynamic climate package in ar01v3-$n.yaml"
 done
+
+CLIMATE_ENABLED="$ROOT_DIR/esphome/climate/enabled.yaml"
+grep -Fq 'name: None' "$CLIMATE_ENABLED" \
+  || fail 'native climate entity does not inherit its selected brand name'
+grep -Fq 'device_id: climate_device' "$CLIMATE_ENABLED" \
+  || fail 'native climate entity is not assigned to its own Home Assistant device'
+grep -Fq 'icon: mdi:air-conditioner' "$CLIMATE_ENABLED" \
+  || fail 'native climate entity icon is not mdi:air-conditioner'
+grep -Fq 'sorting_group_id: group_climate' "$CLIMATE_ENABLED" \
+  || fail 'native climate entity is not assigned to its device web-interface section'
+
+FUJITSU_VERTICAL="$ROOT_DIR/esphome/climate/fujitsu_vertical.yaml"
+grep -Fq 'platform: fujitsu_vertical' "$FUJITSU_VERTICAL" \
+  || fail 'vertical-only Fujitsu climate package is missing'
+grep -Fq 'name: "SET"' "$FUJITSU_VERTICAL" \
+  || fail 'vertical-only Fujitsu SET button is missing'
+[[ "$(grep -Fc 'sorting_group_id: group_climate' "$FUJITSU_VERTICAL")" -eq 2 ]] \
+  || fail 'Fujitsu climate control and SET are not grouped together on the device web interface'
 
 # Run source-level regression and repository-hygiene checks. Publication mode
 # additionally verifies that the private deployment secrets file is absent.
@@ -72,7 +98,7 @@ def is_generated(path: Path) -> bool:
 
 required_base = (
     'project_name: "envpl.ar01v3_esp_rc01_gateway"',
-    'project_version: "1.2.2"',
+    'project_version: "1.2.3"',
     'type: digest',
     'username: !secret web_server_username',
     'password: !secret web_server_password',
@@ -95,7 +121,7 @@ required_base = (
     'js_url: ""',
     'js_include: ar01v3_web_v3.js',
     'include_internal: true',
-    'components: [Flash_comp, flipper_importer, nightmatiq_mesh]',
+    'components: [Flash_comp, flipper_importer, fujitsu_vertical, nightmatiq_mesh]',
     'CONFIG_BLE_MESH_PROVISIONER: y',
     'CONFIG_BT_BLE_DYNAMIC_ENV_MEMORY: y',
     'CONFIG_BTDM_CTRL_BLE_MAX_CONN: "2"',
@@ -506,6 +532,9 @@ for marker in (
     'o.name.replace(/^NightmatIQ /,"")',
     'o.name==="Steinel NightmatIQ Page"?"Configuration Page"',
     'o.name==="Steinel NightmatIQ Page"||o.name==="NightmatIQ Status"',
+    'p=(o,r)=>',
+    'o.device&&o.device!==r',
+    '${p(o,s.name)}',
     'input[data-field="timings"]',
     'style="display:flex;align-items:center;gap:8px;width:100%"',
     'style="flex:1 1 auto;width:auto;min-width:0"',
@@ -588,7 +617,7 @@ required_files = (
     ".github/releases/v1.1.0.md",
     ".github/releases/v1.1.1.md", ".github/releases/v1.1.2.md",
     ".github/releases/v1.2.0.md", ".github/releases/v1.2.1.md",
-    ".github/releases/v1.2.2.md",
+    ".github/releases/v1.2.2.md", ".github/releases/v1.2.3.md",
     "home-assistant/blueprints/automation/envpl/esp_rc01_remote_actions.yaml",
     "home-assistant/nightmatiq_dashboard_card.yaml",
     "docs/NIGHTMATIQ.md", "docs/NIGHTMATIQ_PL.md",
@@ -598,6 +627,8 @@ required_files = (
     "docs/images/steinel.png", ".gitignore",
     "scripts/patch_esphome_api.py",
     "scripts/patch_esphome_ble_tracker.py",
+    "scripts/02_configure.sh", "esphome/climate/enabled.yaml",
+    "esphome/climate/disabled.yaml", "esphome/climate/fujitsu_vertical.yaml",
     "examples/princeton_example.sub", "examples/dooya_example.sub",
     "examples/nec_example.ir",
 )
@@ -611,6 +642,24 @@ if (root / "esphome" / "ar01v3-nightmatiq-experimental.yaml").exists():
 base_yaml = (root / "esphome" / "ar01v3-espnow-10x10-base.yaml").read_text(encoding="utf-8")
 if "  max_send_queue: 8\n" not in base_yaml:
     errors.append("ESPHome API send queue must retain the ESP32 depth needed for entity discovery")
+for marker in (
+    "    - id: group_climate\n",
+    '      name: "${AC_Device_name}"\n',
+    "      sorting_weight: 2\n",
+):
+    if marker not in base_yaml:
+        errors.append(f"native climate web-interface group is missing: {marker.strip()}")
+for marker in (
+    "    id: firmware_version\n",
+    '    name: "Firmware Version"\n',
+    "    entity_category: diagnostic\n",
+    "    internal: true\n",
+    "    update_interval: never\n",
+    "        - text_sensor.template.publish:\n",
+    '            state: "${project_version}"\n',
+):
+    if marker not in base_yaml:
+        errors.append(f"device web-interface firmware version is missing: {marker.strip()}")
 for marker in (
     "    id: nightmatiq_mode\n",
     "    restore_value: true\n",
@@ -635,8 +684,10 @@ for path in root.rglob("*"):
     if path.name == ".DS_Store" or path.name.startswith("._"):
         errors.append(f"macOS metadata file found: {path.relative_to(root)}")
 
-if publication_mode and (root / "esphome" / "secrets.yaml").exists():
-    errors.append("private esphome/secrets.yaml must not be present in the publication tree")
+if publication_mode:
+    for private_name in ("secrets.yaml", "climate.local.json"):
+        if (root / "esphome" / private_name).exists():
+            errors.append(f"private esphome/{private_name} must not be present in the publication tree")
 
 private_markers = (
     "HOME IOT", "/Users/", "/root/", "LED POWER", "SCREEN UP",
@@ -744,44 +795,124 @@ else
   fail 'ESPHome BLE scanner address patch failed'
 fi
 
-# Verify both fallback-AP password paths without creating private files in the repository.
-DEFAULT_SECRET_TEST="$TMP_DIR/secrets-default"
-SEPARATE_SECRET_TEST="$TMP_DIR/secrets-separate"
-mkdir -p "$DEFAULT_SECRET_TEST/scripts" "$DEFAULT_SECRET_TEST/esphome"
-mkdir -p "$SEPARATE_SECRET_TEST/scripts" "$SEPARATE_SECRET_TEST/esphome"
-cp "$ROOT_DIR/scripts/02_configure_secrets.sh" "$DEFAULT_SECRET_TEST/scripts/"
-cp "$ROOT_DIR/scripts/02_configure_secrets.sh" "$SEPARATE_SECRET_TEST/scripts/"
+# Verify receiver selection, first-run defaults, independent climate profiles,
+# separate fallback-AP passwords, and preservation of existing masked values.
+DEFAULT_CONFIG_TEST="$TMP_DIR/config-default"
+SEPARATE_CONFIG_TEST="$TMP_DIR/config-separate"
+PRESERVE_CONFIG_TEST="$TMP_DIR/config-preserve"
+for test_root in "$DEFAULT_CONFIG_TEST" "$SEPARATE_CONFIG_TEST" "$PRESERVE_CONFIG_TEST"; do
+  mkdir -p "$test_root/scripts" "$test_root/esphome"
+  cp "$ROOT_DIR/scripts/02_configure.sh" "$test_root/scripts/"
+  cp "$ROOT_DIR/scripts/lib.sh" "$test_root/scripts/"
+done
 
-if printf 'Test WiFi\nTestWifiPassword\n\nWebPassword123!\nWebPassword123!\n\n' \
-    | bash "$DEFAULT_SECRET_TEST/scripts/02_configure_secrets.sh" >/dev/null \
-  && printf 'Test WiFi\nTestWifiPassword\n\nWebPassword123!\nWebPassword123!\nSeparateAP123!\nSeparateAP123!\n' \
-    | bash "$SEPARATE_SECRET_TEST/scripts/02_configure_secrets.sh" >/dev/null \
-  && python3 - "$DEFAULT_SECRET_TEST/esphome/secrets.yaml" \
-      "$SEPARATE_SECRET_TEST/esphome/secrets.yaml" <<'PY'
+cat >"$PRESERVE_CONFIG_TEST/esphome/secrets.yaml" <<'YAML'
+wifi_ssid: "Existing WiFi"
+wifi_password: "ExistingWifiPassword"
+ota_password: "ExistingOtaPassword"
+fallback_ap_password: "ExistingFallbackPassword"
+web_server_username: "existing-admin"
+web_server_password: "ExistingWebPassword!"
+custom_private_key: "must-survive"
+YAML
+chmod 0600 "$PRESERVE_CONFIG_TEST/esphome/secrets.yaml"
+cat >"$PRESERVE_CONFIG_TEST/esphome/climate.local.json" <<'JSON'
+{
+  "version": 1,
+  "selected_receiver": "01",
+  "receivers": {
+    "01": "fujitsu_general",
+    "02": "disabled"
+  }
+}
+JSON
+chmod 0600 "$PRESERVE_CONFIG_TEST/esphome/climate.local.json"
+
+if printf 'Test WiFi\nTestWifiPassword\n\n\nWebPassword123!\nWebPassword123!\n\n9\n' \
+    | bash "$DEFAULT_CONFIG_TEST/scripts/02_configure.sh" 03 >/dev/null 2>&1 \
+  && printf 'Test WiFi\nTestWifiPassword\n\n\nWebPassword123!\nWebPassword123!\nSeparateAP123!\nSeparateAP123!\n\n' \
+    | bash "$SEPARATE_CONFIG_TEST/scripts/02_configure.sh" 04 >/dev/null 2>&1 \
+  && printf '\n\n\n\n\n\n\n' \
+    | bash "$PRESERVE_CONFIG_TEST/scripts/02_configure.sh" 02 >/dev/null 2>&1 \
+  && python3 - "$DEFAULT_CONFIG_TEST" "$SEPARATE_CONFIG_TEST" \
+      "$PRESERVE_CONFIG_TEST" <<'PY'
 import json
 import stat
 import sys
 from pathlib import Path
 
-def load(path_string):
-    path = Path(path_string)
+def load_secrets(root_string):
+    path = Path(root_string) / "esphome" / "secrets.yaml"
     values = {}
     for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
         key, value = line.split(":", 1)
         values[key] = json.loads(value.strip())
     assert stat.S_IMODE(path.stat().st_mode) == 0o600
     return values
 
-default = load(sys.argv[1])
-separate = load(sys.argv[2])
+default_root, separate_root, preserve_root = map(Path, sys.argv[1:])
+default = load_secrets(default_root)
+separate = load_secrets(separate_root)
+preserved = load_secrets(preserve_root)
 assert default["fallback_ap_password"] == default["web_server_password"]
 assert separate["fallback_ap_password"] == "SeparateAP123!"
 assert separate["fallback_ap_password"] != separate["web_server_password"]
+default_climate = json.loads(
+    (default_root / "esphome" / "climate.local.json").read_text(encoding="utf-8")
+)
+assert default_climate["selected_receiver"] == "03"
+assert default_climate["receivers"] == {"03": "fujitsu_general"}
+separate_climate = json.loads(
+    (separate_root / "esphome" / "climate.local.json").read_text(encoding="utf-8")
+)
+assert separate_climate["selected_receiver"] == "04"
+assert separate_climate["receivers"] == {"04": "coolix"}
+assert preserved == {
+    "wifi_ssid": "Existing WiFi",
+    "wifi_password": "ExistingWifiPassword",
+    "ota_password": "ExistingOtaPassword",
+    "fallback_ap_password": "ExistingFallbackPassword",
+    "web_server_username": "existing-admin",
+    "web_server_password": "ExistingWebPassword!",
+    "custom_private_key": "must-survive",
+}
+preserved_climate = json.loads(
+    (preserve_root / "esphome" / "climate.local.json").read_text(encoding="utf-8")
+)
+assert preserved_climate["selected_receiver"] == "02"
+preserved_profiles = preserved_climate["receivers"]
+assert preserved_profiles["01"] == "fujitsu_general"
+assert preserved_profiles["02"] == "disabled"
 PY
 then
-  ok 'fallback AP password configuration'
+  ok 'installation configuration and value preservation'
 else
-  fail 'fallback AP password configuration failed'
+  fail 'installation configuration regression test failed'
+fi
+
+CLIMATE_ARG_TEST="$TMP_DIR/climate-args"
+mkdir -p "$CLIMATE_ARG_TEST/esphome"
+cat >"$CLIMATE_ARG_TEST/esphome/climate.local.json" <<'JSON'
+{"version": 1, "selected_receiver": "02", "receivers": {"01": "fujitsu_general", "02": "disabled", "03": "fujitsu_vertical"}}
+JSON
+if bash -c '
+    set -euo pipefail
+    source "$1/scripts/lib.sh"
+    [[ "$(selected_device_number "$2")" == "02" ]]
+    prepare_climate_args "$2" 01
+    [[ "${ESPHOME_CLIMATE_ARGS[*]}" == "-s climate_profile enabled -s AC_Platform_name fujitsu_general -s AC_Device_name Fujitsu" ]]
+    prepare_climate_args "$2" 02
+    [[ "${ESPHOME_CLIMATE_ARGS[*]}" == "-s climate_profile disabled -s AC_Platform_name coolix -s AC_Device_name Coolix" ]]
+    prepare_climate_args "$2" 03
+    [[ "${ESPHOME_CLIMATE_ARGS[*]}" == "-s climate_profile fujitsu_vertical -s AC_Platform_name fujitsu_vertical -s AC_Device_name Fujitsu" ]]
+    prepare_climate_args "$3" 04
+    [[ "${ESPHOME_CLIMATE_ARGS[*]}" == "-s climate_profile enabled -s AC_Platform_name coolix -s AC_Device_name Coolix" ]]
+  ' _ "$ROOT_DIR" "$CLIMATE_ARG_TEST" "$TMP_DIR/no-local-settings"; then
+  ok 'saved receiver and per-receiver climate command-line configuration'
+else
+  fail 'saved receiver and per-receiver climate command-line configuration failed'
 fi
 
 # Compile parser and component tests when a host C++ compiler is available.
@@ -809,10 +940,19 @@ elif command -v g++ >/dev/null 2>&1; then
       -o "$TMP_DIR/flash_comp.o" \
     && g++ -std=c++20 -Wall -Wextra -Werror -pedantic \
       -I"$ROOT_DIR/tests/stubs" -I"$ROOT_DIR" \
+      -c "$ROOT_DIR/esphome/components/fujitsu_vertical/fujitsu_vertical.cpp" \
+      -o "$TMP_DIR/fujitsu_vertical.o" \
+    && g++ -std=c++20 -Wall -Wextra -Werror -pedantic \
+      -I"$ROOT_DIR/tests/stubs" -I"$ROOT_DIR" \
       "$ROOT_DIR/tests/test_component_compile.cpp" \
       "$TMP_DIR/flipper_importer.o" "$TMP_DIR/flash_comp.o" \
       -o "$TMP_DIR/test_component_compile" \
-    && "$TMP_DIR/test_component_compile"; then
+    && "$TMP_DIR/test_component_compile" \
+    && g++ -std=c++20 -Wall -Wextra -Werror -pedantic \
+      -I"$ROOT_DIR/tests/stubs" -I"$ROOT_DIR" \
+      "$ROOT_DIR/tests/test_fujitsu_vertical.cpp" "$TMP_DIR/fujitsu_vertical.o" \
+      -o "$TMP_DIR/test_fujitsu_vertical" \
+    && "$TMP_DIR/test_fujitsu_vertical"; then
     ok 'host compilation of custom C++ components'
   else
     fail 'custom component host compilation failed'
@@ -830,6 +970,8 @@ root = Path(sys.argv[1])
 for path in (
     root / "esphome/components/Flash_comp/__init__.py",
     root / "esphome/components/flipper_importer/__init__.py",
+    root / "esphome/components/fujitsu_vertical/__init__.py",
+    root / "esphome/components/fujitsu_vertical/climate.py",
     root / "esphome/components/nightmatiq_mesh/__init__.py",
     root / "scripts/generate_flipper_page.py",
     root / "scripts/generate_nightmatiq_page.py",
